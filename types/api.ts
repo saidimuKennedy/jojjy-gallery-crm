@@ -2,7 +2,6 @@
 
 import {
   Artwork as PrismaArtwork,
-  Transaction as PrismaTransaction,
   User as PrismaUser,
   Series as PrismaSeries,
   // MODIFIED: Renamed import from MediaFile to ArtworkMediaFile
@@ -90,17 +89,6 @@ export interface Artwork
   reservedByCurrentUser?: boolean;
 }
 
-export interface Transaction
-  extends Omit<
-    PrismaTransaction,
-    "amount" | "timestamp" | "createdAt" | "updatedAt"
-  > {
-  amount: number;
-  timestamp: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
 export interface User extends Omit<PrismaUser, "createdAt" | "updatedAt"> {
   createdAt?: string;
   updatedAt?: string;
@@ -108,16 +96,12 @@ export interface User extends Omit<PrismaUser, "createdAt" | "updatedAt"> {
 
 // MODIFIED: Updated ArtworkWithRelations to use ArtworkMediaFile
 export interface ArtworkWithRelations extends Artwork {
-  transactions?: Transaction[];
   series?: Series | null;
   mediaFiles?: ArtworkMediaFile[]; // MODIFIED: Changed to ArtworkMediaFile[]
 }
 
 // MODIFIED: Updated ArtworkWithFullRelations to use ArtworkMediaFile
 export interface ArtworkWithFullRelations extends Artwork {
-  transactions?: (Transaction & {
-    user?: User;
-  })[];
   series?: Series | null;
   mediaFiles?: ArtworkMediaFile[]; // MODIFIED: Changed to ArtworkMediaFile[]
 }
@@ -199,34 +183,6 @@ export interface ArtworkFilters {
   [key: string]: string | number | boolean | undefined;
 }
 
-export interface PaymentSuccessData {
-  transactionId: string;
-  artworkIds: number[];
-  status: "pending" | "confirmed" | "failed";
-  amount: number;
-  phoneNumber: string;
-  timestamp: string;
-  stkResponse: {};
-}
-
-export interface PaymentResponse {
-  success: boolean;
-  message?: string;
-  data?: PaymentSuccessData;
-  error?: string;
-}
-
-export interface PaymentErrorData {
-  success: boolean;
-  message: string;
-  error?: string;
-}
-
-export interface CartPaymentRequestData {
-  phoneNumber: string;
-  artworkIds: number[];
-}
-
 export function convertPrismaSeriesToAPI(series: PrismaSeries): Series {
   return {
     ...series,
@@ -305,18 +261,6 @@ export function convertPrismaMediaBlogFileToAPI(
   };
 }
 
-export function convertPrismaTransactionToAPI(
-  transaction: PrismaTransaction
-): Transaction {
-  return {
-    ...transaction,
-    amount: transaction.amount.toNumber(),
-    timestamp: transaction.timestamp.toISOString(),
-    createdAt: transaction.createdAt.toISOString(),
-    updatedAt: transaction.updatedAt.toISOString(),
-  };
-}
-
 export function convertPrismaUserToAPI(user: PrismaUser): User {
   return {
     ...user,
@@ -328,14 +272,12 @@ export function convertPrismaUserToAPI(user: PrismaUser): User {
 // MODIFIED: Updated convertPrismaArtworkWithRelationsToAPI
 export function convertPrismaArtworkWithRelationsToAPI(
   artwork: PrismaArtwork & {
-    transactions?: PrismaTransaction[];
     series?: PrismaSeries | null;
     mediaFiles?: PrismaArtworkMediaFile[]; // MODIFIED: Changed to PrismaArtworkMediaFile[]
   }
 ): ArtworkWithRelations {
   return {
     ...convertPrismaArtworkToAPI(artwork),
-    transactions: artwork.transactions?.map(convertPrismaTransactionToAPI),
     series: artwork.series ? convertPrismaSeriesToAPI(artwork.series) : null,
     mediaFiles: artwork.mediaFiles?.map(convertPrismaArtworkMediaFileToAPI), // MODIFIED: Changed function call
   };
