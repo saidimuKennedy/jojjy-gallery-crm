@@ -3,6 +3,15 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
+# Standalone stage to run `prisma migrate deploy` without a full `next build`.
+FROM node:24-slim AS migrator
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json ./
+COPY prisma ./prisma
+COPY prisma.config.js ./prisma.config.js
+CMD ["npx", "prisma", "migrate", "deploy"]
+
 FROM node:24-slim AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
