@@ -165,6 +165,8 @@ model Event {
   startsAt      DateTime
   endsAt        DateTime?
   status        EventStatus      @default(DRAFT)
+  /// Optional schedule: DRAFT auto-flips to PUBLISHED once publishAt passes.
+  publishAt     DateTime?
   /// Phase 2 richer event page fields.
   directions    String?
   openingHours  String?

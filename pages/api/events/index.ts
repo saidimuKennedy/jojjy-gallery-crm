@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import type { Event, EventStatus, TicketType } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { requirePermission } from "@/lib/require-permission";
+import { promoteEventStatus } from "@/lib/events";
 
 function slugify(input: string): string {
   return input
@@ -15,6 +16,7 @@ function serializeEvent(
 ) {
   return {
     ...event,
+    publishAt: event.publishAt ? event.publishAt.toISOString() : null,
     startsAt: event.startsAt.toISOString(),
     endsAt: event.endsAt ? event.endsAt.toISOString() : null,
     artistTalkAt: event.artistTalkAt
@@ -49,6 +51,11 @@ export default async function handler(
           },
         });
 
+        const now = new Date();
+        for (const event of events) {
+          await promoteEventStatus(event, now);
+        }
+
         return res.status(200).json({
           success: true,
           data: events.map(serializeEvent),
@@ -66,6 +73,7 @@ export default async function handler(
           imageUrl,
           startsAt,
           endsAt,
+          publishAt,
           status,
           directions,
           openingHours,
@@ -80,6 +88,19 @@ export default async function handler(
           });
         }
 
+        // Status is time-driven: staff may only set CANCELLED (manual) or
+        // PUBLISHED via "publish now". COMPLETED is never settable here.
+        let eventStatus: EventStatus = "DRAFT";
+        let storedPublishAt: Date | null = publishAt
+          ? new Date(publishAt)
+          : null;
+        if (status === "CANCELLED") {
+          eventStatus = "CANCELLED";
+        } else if (status === "PUBLISHED") {
+          eventStatus = "PUBLISHED";
+          storedPublishAt = null;
+        }
+
         const eventSlug = slug || slugify(title);
 
         const created = await prisma.event.create({
@@ -91,7 +112,8 @@ export default async function handler(
             imageUrl: imageUrl ?? null,
             startsAt: new Date(startsAt),
             endsAt: endsAt ? new Date(endsAt) : null,
-            status: (status as EventStatus) ?? "DRAFT",
+            publishAt: storedPublishAt,
+            status: eventStatus,
             directions: directions ?? null,
             openingHours: openingHours ?? null,
             artistTalkAt: artistTalkAt ? new Date(artistTalkAt) : null,

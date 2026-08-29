@@ -1,7 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import type { Event, EventStatus, TicketType } from "@prisma/client";
+import type { Event, EventStatus, Prisma, TicketType } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { requirePermission } from "@/lib/require-permission";
+import { promoteEventStatus } from "@/lib/events";
 
 function slugify(input: string): string {
   return input
@@ -15,6 +16,7 @@ function serializeEvent(
 ) {
   return {
     ...event,
+    publishAt: event.publishAt ? event.publishAt.toISOString() : null,
     startsAt: event.startsAt.toISOString(),
     endsAt: event.endsAt ? event.endsAt.toISOString() : null,
     artistTalkAt: event.artistTalkAt
@@ -68,6 +70,8 @@ export default async function handler(
             .json({ success: false, message: "Event not found" });
         }
 
+        await promoteEventStatus(event);
+
         return res.status(200).json({
           success: true,
           data: serializeEvent(event),
@@ -85,6 +89,7 @@ export default async function handler(
           imageUrl,
           startsAt,
           endsAt,
+          publishAt,
           status,
           directions,
           openingHours,
@@ -98,21 +103,32 @@ export default async function handler(
           });
         }
 
+        // Status is time-driven: staff may only set CANCELLED (manual cancel)
+        // or PUBLISHED via "publish now". COMPLETED is never settable here and
+        // any other status is left alone so the read-path promotion owns it.
+        const data: Prisma.EventUpdateInput = {
+          title,
+          slug: slug || slugify(title),
+          description: description ?? null,
+          venue: venue ?? null,
+          imageUrl: imageUrl ?? null,
+          startsAt: new Date(startsAt),
+          endsAt: endsAt ? new Date(endsAt) : null,
+          publishAt: publishAt ? new Date(publishAt) : null,
+          directions: directions ?? null,
+          openingHours: openingHours ?? null,
+          artistTalkAt: artistTalkAt ? new Date(artistTalkAt) : null,
+        };
+        if (status === "CANCELLED") {
+          data.status = "CANCELLED";
+        } else if (status === "PUBLISHED") {
+          data.status = "PUBLISHED";
+          data.publishAt = null;
+        }
+
         const updated = await prisma.event.update({
           where: { id: eventId },
-          data: {
-            title,
-            slug: slug || slugify(title),
-            description: description ?? null,
-            venue: venue ?? null,
-            imageUrl: imageUrl ?? null,
-            startsAt: new Date(startsAt),
-            endsAt: endsAt ? new Date(endsAt) : null,
-            status: (status as EventStatus) ?? undefined,
-            directions: directions ?? null,
-            openingHours: openingHours ?? null,
-            artistTalkAt: artistTalkAt ? new Date(artistTalkAt) : null,
-          },
+          data,
           include: {
             ticketTypes: { orderBy: { price: "asc" } },
           },
