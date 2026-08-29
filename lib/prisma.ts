@@ -11,8 +11,18 @@ declare global {
  * Newer `pg` treats sslmode=require as verify-full, which fails against
  * managed Postgres cert chains (Prisma Postgres, Neon, Supabase, etc.).
  */
+function isLocalHost(connectionString: string | undefined) {
+  if (!connectionString) return false;
+  try {
+    const { hostname } = new URL(connectionString);
+    return hostname === "localhost" || hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
 function withRelaxedSsl(connectionString: string | undefined) {
-  if (!connectionString) return connectionString;
+  if (!connectionString || isLocalHost(connectionString)) return connectionString;
 
   try {
     const url = new URL(connectionString);
@@ -27,13 +37,14 @@ function withRelaxedSsl(connectionString: string | undefined) {
   }
 }
 
+const isLocal = isLocalHost(process.env.DATABASE_URL);
 const connectionString = withRelaxedSsl(process.env.DATABASE_URL);
 
 function createPrismaClient() {
   const pool = new Pool({
     connectionString,
     max: 1,
-    ssl: { rejectUnauthorized: false },
+    ssl: isLocal ? false : { rejectUnauthorized: false },
   });
   const adapter = new PrismaPg(pool);
   return new PrismaClient({ adapter });

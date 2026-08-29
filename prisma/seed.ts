@@ -41,9 +41,13 @@ async function main() {
   }
 
   let connectionString = rawUrl;
+  let isLocalHost = false;
   try {
     const url = new URL(rawUrl);
-    url.searchParams.set("sslmode", "no-verify");
+    isLocalHost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+    if (!isLocalHost) {
+      url.searchParams.set("sslmode", "no-verify");
+    }
     connectionString = url.toString();
   } catch {
     /* keep as-is */
@@ -52,7 +56,7 @@ async function main() {
   const pool = new Pool({
     connectionString,
     max: 1,
-    ssl: { rejectUnauthorized: false },
+    ssl: isLocalHost ? false : { rejectUnauthorized: false },
   });
   const adapter = new PrismaPg(pool);
   const prisma = new PrismaClient({ adapter });
