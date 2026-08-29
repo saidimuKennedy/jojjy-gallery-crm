@@ -1,0 +1,740 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Series {
+  id              Int               @id @default(autoincrement())
+  name            String            @unique
+  slug            String            @unique
+  description     String
+  /// Exhibition-page copy (Phase 2): opening framing text for the collection page.
+  introduction    String?
+  artistStatement String?
+  filmUrl         String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  artworks        Artwork[]
+  mediaFiles      SeriesMediaFile[]
+
+  @@map("series")
+}
+
+/// Behind-the-scenes photos/video for a Series exhibition page (Phase 2).
+model SeriesMediaFile {
+  id           Int           @id @default(autoincrement())
+  url          String
+  type         MediaFileType
+  description  String?
+  thumbnailUrl String?
+  order        Int           @default(0)
+  seriesId     Int
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  series       Series        @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  @@map("series_media_files")
+}
+
+model Artwork {
+  id               Int                @id @default(autoincrement())
+  title            String
+  artist           String
+  category         String
+  price            Decimal            @db.Decimal(10, 2)
+  imageUrl         String
+  description      String?
+  dimensions       String?
+  isAvailable      Boolean?           @default(true)
+  /// Collector-facing status, richer than isAvailable (kept for backward
+  /// compatibility with existing checkout/admin code). Sold/collected works
+  /// stay visible on the site instead of disappearing.
+  status           ArtworkStatus      @default(AVAILABLE)
+  /// Phase 2 reserve-before-buy: set alongside status = RESERVED, cleared on
+  /// expiry or completed purchase. Expiry release is an application-level job.
+  reservedUntil    DateTime?
+  reservedByUserId String?
+  views            Int                @default(0)
+  likes            Int                @default(0)
+  medium           String
+  year             Int
+  seriesId         Int?
+  inGallery        Boolean            @default(false)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  mediaFiles       ArtworkMediaFile[]
+  series           Series?            @relation(fields: [seriesId], references: [id])
+  reservedByUser   User?              @relation(fields: [reservedByUserId], references: [id])
+  wishlistedBy     WishlistItem[]
+  orderItems       OrderItem[]
+
+  @@map("artworks")
+}
+
+model ArtworkMediaFile {
+  id           Int           @id @default(autoincrement())
+  url          String
+  type         MediaFileType
+  description  String?
+  thumbnailUrl String?
+  order        Int           @default(0)
+  artworkId    Int
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  artwork      Artwork       @relation(fields: [artworkId], references: [id], onDelete: Cascade)
+
+  @@map("artwork_media_files")
+}
+
+model MediaBlogEntry {
+  id           Int                @id @default(autoincrement())
+  title        String
+  shortDesc    String?
+  type         MediaBlogEntryType
+  externalLink String?
+  thumbnailUrl String?            @db.VarChar(500)
+  duration     String?            @db.VarChar(50)
+  content      String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  mediaFiles   MediaBlogFile[]
+
+  @@map("media_blog_entries")
+}
+
+model MediaBlogFile {
+  id               Int            @id @default(autoincrement())
+  url              String
+  type             MediaFileType
+  description      String?
+  thumbnailUrl     String?
+  order            Int            @default(0)
+  mediaBlogEntryId Int
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  mediaBlogEntry   MediaBlogEntry @relation(fields: [mediaBlogEntryId], references: [id], onDelete: Cascade)
+
+  @@map("media_blog_files")
+}
+
+model User {
+  id                String         @id @default(uuid())
+  username          String         @unique
+  email             String         @unique
+  passwordHash      String
+  role              UserRole       @default(USER)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  sessions          Session[]
+  Transaction       Transaction[]
+  orders            Order[]
+  tickets           Ticket[]
+  reservedArtworks  Artwork[]
+  wishlist          WishlistItem[]
+  eventRsvps        EventRsvp[]
+  subscriberProfile Subscriber?
+  memberships       Membership[]
+  releaseUnlocks    ReleaseUnlock[]
+  paidPlayQuotas    PaidPlayQuota[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  expiresAt DateTime
+  data      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@map("sessions")
+}
+
+model Transaction {
+  id          String   @id @default(uuid())
+  artworkIds  String?
+  userId      String
+  status      String
+  amount      Decimal  @db.Decimal(10, 2)
+  phoneNumber String
+  timestamp   DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@map("transactions")
+}
+
+/// Ticketed event, managed from the CRM. Public site reads/lists published events.
+model Event {
+  id            Int              @id @default(autoincrement())
+  title         String
+  slug          String           @unique
+  description   String?
+  venue         String?
+  imageUrl      String?
+  startsAt      DateTime
+  endsAt        DateTime?
+  status        EventStatus      @default(DRAFT)
+  /// Phase 2 richer event page fields.
+  directions    String?
+  openingHours  String?
+  artistTalkAt  DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  ticketTypes   TicketType[]
+  announcements Announcement[]
+  rsvps         EventRsvp[]
+  mediaFiles    EventMediaFile[]
+  pressMentions PressMention[]
+
+  @@map("events")
+}
+
+/// Fan RSVP for an event (Phase 2 fan/supporter accounts).
+model EventRsvp {
+  id        String     @id @default(uuid())
+  userId    String
+  eventId   Int
+  status    RsvpStatus @default(GOING)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event     Event      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId])
+  @@map("event_rsvps")
+}
+
+/// Post-event archive photos/video (Phase 2), separate from pre-event `Event.imageUrl`.
+model EventMediaFile {
+  id           Int           @id @default(autoincrement())
+  url          String
+  type         MediaFileType
+  description  String?
+  thumbnailUrl String?
+  order        Int           @default(0)
+  eventId      Int
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  event        Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@map("event_media_files")
+}
+
+/// Press coverage, optionally tied to a specific event (Phase 2 event archive).
+model PressMention {
+  id          Int       @id @default(autoincrement())
+  title       String
+  url         String
+  publication String?
+  publishedAt DateTime?
+  eventId     Int?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  event       Event?    @relation(fields: [eventId], references: [id])
+
+  @@map("press_mentions")
+}
+
+/// Wishlist entry — a fan saving an artwork without buying it yet (Phase 2).
+model WishlistItem {
+  id        String   @id @default(uuid())
+  userId    String
+  artworkId Int
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  artwork   Artwork  @relation(fields: [artworkId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, artworkId])
+  @@map("wishlist_items")
+}
+
+/// A priced tier of tickets for an event (e.g. General Admission, VIP).
+model TicketType {
+  id           Int         @id @default(autoincrement())
+  eventId      Int
+  name         String
+  price        Decimal     @db.Decimal(10, 2)
+  quantity     Int
+  quantitySold Int         @default(0)
+  salesStart   DateTime?
+  salesEnd     DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  event        Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  tickets      Ticket[]
+  orderItems   OrderItem[]
+
+  @@map("ticket_types")
+}
+
+/// One issued ticket, owned by a buyer, redeemable at the door via `code`.
+model Ticket {
+  id           String       @id @default(uuid())
+  ticketTypeId Int
+  userId       String
+  orderId      String
+  code         String       @unique
+  status       TicketStatus @default(VALID)
+  checkedInAt  DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  ticketType   TicketType   @relation(fields: [ticketTypeId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+  order        Order        @relation(fields: [orderId], references: [id])
+
+  @@map("tickets")
+}
+
+/// Merch item, managed from the CRM.
+model Product {
+  id          Int              @id @default(autoincrement())
+  name        String
+  slug        String           @unique
+  description String?
+  imageUrl    String?
+  category    String?
+  isAvailable Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  variants    ProductVariant[]
+
+  @@map("products")
+}
+
+/// A purchasable size/color combination of a Product, each with its own stock and price.
+model ProductVariant {
+  id         Int         @id @default(autoincrement())
+  productId  Int
+  sku        String      @unique
+  size       String?
+  color      String?
+  price      Decimal     @db.Decimal(10, 2)
+  stock      Int         @default(0)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@map("product_variants")
+}
+
+/// Unified purchase record for tickets and merch (kept separate from the
+/// legacy artwork `Transaction`/M-Pesa flow to avoid touching that checkout
+/// path; consolidation can happen later).
+model Order {
+  id              String          @id @default(uuid())
+  userId          String
+  status          OrderStatus     @default(PENDING)
+  paymentProvider PaymentProvider
+  amount          Decimal         @db.Decimal(10, 2)
+  currency        String          @default("KES")
+  phoneNumber     String?
+  paystackRef     String?         @unique
+  /// Phase 2 delivery/logistics for physical items (merch, and later original
+  /// artwork if the legacy artwork checkout is consolidated into Order).
+  deliveryMethod  DeliveryMethod?
+  deliveryAddress String?
+  packaging       PackagingType?
+  deliveryFee     Decimal?        @db.Decimal(10, 2)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  user            User            @relation(fields: [userId], references: [id])
+  items           OrderItem[]
+  tickets         Ticket[]
+
+  @@map("orders")
+}
+
+/// A single line item on an Order. Exactly one product reference is set,
+/// matching `itemType` (PRODUCT | TICKET | ARTWORK | RELEASE | MEMBERSHIP_PASS).
+model OrderItem {
+  id               String          @id @default(uuid())
+  orderId          String
+  itemType         OrderItemType
+  productVariantId Int?
+  ticketTypeId     Int?
+  /// Original artwork line item (Studio Shop).
+  artworkId        Int?
+  releaseId        Int?
+  membershipPlanId Int?
+  quantity         Int             @default(1)
+  unitPrice        Decimal         @db.Decimal(10, 2)
+  createdAt        DateTime        @default(now())
+  order            Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productVariant   ProductVariant? @relation(fields: [productVariantId], references: [id])
+  ticketType       TicketType?     @relation(fields: [ticketTypeId], references: [id])
+  artwork          Artwork?        @relation(fields: [artworkId], references: [id])
+  release          Release?        @relation(fields: [releaseId], references: [id])
+  membershipPlan   MembershipPlan? @relation(fields: [membershipPlanId], references: [id])
+
+  @@map("order_items")
+}
+
+/// Fan-facing announcement, authored in the CRM, optionally tied to an Event.
+/// Delivery channels (on-site, email, WhatsApp) are tracked independently
+/// since a single announcement may go out on more than one.
+model Announcement {
+  id             Int       @id @default(autoincrement())
+  title          String
+  body           String
+  eventId        Int?
+  publishedAt    DateTime?
+  emailSentAt    DateTime?
+  whatsappSentAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  event          Event?    @relation(fields: [eventId], references: [id])
+
+  @@map("announcements")
+}
+
+/// Fan opt-in for announcement delivery. Not the same as `User` — a fan can
+/// subscribe to updates without creating a purchasing account. When a
+/// logged-in User also opts in ("follow the artist", Phase 2), `userId`
+/// links the two records.
+model Subscriber {
+  id             String           @id @default(uuid())
+  email          String?          @unique
+  phoneNumber    String?          @unique
+  userId         String?          @unique
+  status         SubscriberStatus @default(ACTIVE)
+  subscribedAt   DateTime         @default(now())
+  confirmedAt    DateTime?
+  unsubscribedAt DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  user           User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([email])
+  @@map("subscribers")
+}
+
+enum SubscriberStatus {
+  ACTIVE
+  UNSUBSCRIBED
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  COMPLETED
+}
+
+enum TicketStatus {
+  VALID
+  CHECKED_IN
+  CANCELLED
+  REFUNDED
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentProvider {
+  MPESA
+  PAYSTACK
+}
+
+enum OrderItemType {
+  PRODUCT
+  TICKET
+  ARTWORK
+  RELEASE
+  MEMBERSHIP_PASS
+}
+
+enum RsvpStatus {
+  GOING
+  INTERESTED
+  CANCELLED
+}
+
+enum DeliveryMethod {
+  LOCAL_PICKUP
+  NAIROBI_DELIVERY
+  KENYA_SHIPPING
+  INTERNATIONAL_SHIPPING
+}
+
+enum PackagingType {
+  FRAMED
+  ROLLED
+}
+
+enum ArtworkStatus {
+  AVAILABLE
+  RESERVED
+  ON_EXHIBITION
+  SOLD
+  IN_PRIVATE_COLLECTION
+}
+
+enum MediaFileType {
+  IMAGE
+  VIDEO
+  AUDIO
+}
+
+enum MediaBlogEntryType {
+  VIDEO
+  IMAGES
+  AUDIO
+  EXTERNAL_LINK
+  BLOG_POST
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+// ---------------------------------------------------------------------------
+// Music module — catalogue in CRM; entitlements for gallery Users.
+// ---------------------------------------------------------------------------
+
+enum MusicPublishStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum MusicAccessMode {
+  FREE
+  PAID
+  MEMBERS_ONLY
+}
+
+enum MusicReleaseType {
+  SINGLE
+  EP
+  ALBUM
+  LIVE_SESSION
+  ACOUSTIC_SESSION
+}
+
+enum MembershipStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum ReleaseUnlockSource {
+  ORDER
+  CRM_MANUAL
+}
+
+model Release {
+  id            Int                @id @default(autoincrement())
+  slug          String             @unique
+  title         String
+  description   String?
+  coverImage    String?
+  artistName    String             @default("Jojjy Gallery")
+  releaseType   MusicReleaseType   @default(SINGLE)
+  genre         String?
+  publishStatus MusicPublishStatus @default(DRAFT)
+  publishAt     DateTime?
+  explicit      Boolean            @default(false)
+  releaseDate   DateTime?
+  playCount     Int                @default(0)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  tracks        Track[]
+  accessPolicy  AccessPolicy?
+  unlocks       ReleaseUnlock[]
+  paidPlayQuotas PaidPlayQuota[]
+  orderItems    OrderItem[]
+
+  @@map("music_releases")
+}
+
+model Track {
+  id          Int      @id @default(autoincrement())
+  releaseId   Int
+  title       String
+  trackNumber Int
+  duration    Int?
+  storageKey  String
+  bitrate     Int?
+  fileSize    Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  release     Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@unique([releaseId, trackNumber])
+  @@map("music_tracks")
+}
+
+model AccessPolicy {
+  id             Int             @id @default(autoincrement())
+  releaseId      Int             @unique
+  accessMode     MusicAccessMode @default(PAID)
+  price          Decimal?        @db.Decimal(10, 2)
+  currency       String          @default("KES")
+  paidPlayLimit  Int             @default(3)
+  updatedAt      DateTime        @updatedAt
+  release        Release         @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@map("music_access_policies")
+}
+
+model MembershipPlan {
+  id           Int         @id @default(autoincrement())
+  name         String
+  description  String?
+  price        Decimal     @db.Decimal(10, 2)
+  currency     String      @default("KES")
+  durationDays Int
+  active       Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  memberships  Membership[]
+  orderItems   OrderItem[]
+
+  @@map("music_membership_plans")
+}
+
+model Membership {
+  id                 String           @id @default(uuid())
+  userId             String
+  membershipPlanId   Int
+  orderId            String?
+  grantedByCrmUserId String?
+  startedAt          DateTime         @default(now())
+  expiresAt          DateTime
+  status             MembershipStatus @default(ACTIVE)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan               MembershipPlan   @relation(fields: [membershipPlanId], references: [id])
+
+  @@index([userId, status])
+  @@map("music_memberships")
+}
+
+model ReleaseUnlock {
+  id                 String              @id @default(uuid())
+  userId             String
+  releaseId          Int
+  orderItemId        String?
+  grantedByCrmUserId String?
+  source             ReleaseUnlockSource
+  createdAt          DateTime            @default(now())
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  release            Release             @relation(fields: [releaseId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, releaseId])
+  @@map("music_release_unlocks")
+}
+
+model PaidPlayQuota {
+  id           String   @id @default(uuid())
+  releaseId    Int
+  userId       String?
+  anonymousKey String?
+  playCount    Int      @default(0)
+  updatedAt    DateTime @updatedAt
+  release      Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([releaseId, userId])
+  @@unique([releaseId, anonymousKey])
+  @@map("music_paid_play_quotas")
+}
+
+// ---------------------------------------------------------------------------
+// CRM staff auth — separate from gallery User (customer) identity.
+// ---------------------------------------------------------------------------
+
+model CrmUser {
+  id           String              @id @default(uuid())
+  email        String              @unique
+  name         String?
+  passwordHash String
+  isActive     Boolean             @default(true)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  sessions     CrmSession[]
+  roles        CrmUserRole[]
+  permissions  CrmUserPermission[]
+
+  @@map("crm_users")
+}
+
+model CrmSession {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         CrmUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("crm_sessions")
+}
+
+model CrmRole {
+  id          String              @id @default(uuid())
+  name        String              @unique
+  description String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  users       CrmUserRole[]
+  permissions CrmRolePermission[]
+
+  @@map("crm_roles")
+}
+
+model CrmPermission {
+  id          String              @id @default(uuid())
+  key         String              @unique // e.g. "artworks:write", "events:read"
+  description String?
+  roles       CrmRolePermission[]
+  users       CrmUserPermission[]
+
+  @@map("crm_permissions")
+}
+
+model CrmUserRole {
+  userId String
+  roleId String
+  user   CrmUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   CrmRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("crm_user_roles")
+}
+
+model CrmRolePermission {
+  roleId       String
+  permissionId String
+  role         CrmRole       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   CrmPermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("crm_role_permissions")
+}
+
+model CrmUserPermission {
+  userId       String
+  permissionId String
+  granted      Boolean       @default(true) // false = explicit revoke over role
+  user         CrmUser       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission   CrmPermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@map("crm_user_permissions")
+}
