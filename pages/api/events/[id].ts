@@ -121,6 +121,7 @@ export default async function handler(
         };
         if (status === "CANCELLED") {
           data.status = "CANCELLED";
+          data.publishAt = null;
         } else if (status === "PUBLISHED") {
           data.status = "PUBLISHED";
           data.publishAt = null;

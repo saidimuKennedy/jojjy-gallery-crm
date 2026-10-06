@@ -98,6 +98,9 @@ model MediaBlogEntry {
   thumbnailUrl String?            @db.VarChar(500)
   duration     String?            @db.VarChar(50)
   content      String?
+  /// Editorial publication state: null = DRAFT (never public); set = published
+  /// (public once reached). Existing rows are backfilled from createdAt.
+  publishedAt  DateTime?
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
   mediaFiles   MediaBlogFile[]
@@ -531,6 +534,8 @@ model Release {
   slug          String             @unique
   title         String
   description   String?
+  artistNotes   String?
+  studioNotes   String?
   coverImage    String?
   artistName    String             @default("Jojjy Gallery")
   releaseType   MusicReleaseType   @default(SINGLE)

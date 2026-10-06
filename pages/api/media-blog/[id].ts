@@ -40,6 +40,15 @@ export default async function handler(
 
         const { mediaFiles, ...entryData } = req.body;
 
+        // Explicit null clears to DRAFT; a value (re)publishes. Absent leaves
+        // the stored publication state untouched.
+        const publishedAt =
+          entryData.publishedAt === null
+            ? null
+            : entryData.publishedAt
+              ? new Date(entryData.publishedAt)
+              : undefined;
+
         const updatedEntry = await prisma.$transaction(async (tx) => {
           await tx.mediaBlogEntry.update({
             where: { id: entryId },
@@ -48,6 +57,7 @@ export default async function handler(
               shortDesc: entryData.shortDesc,
               type: entryData.type as MediaBlogEntryType,
               externalLink: entryData.externalLink,
+              ...(publishedAt !== undefined ? { publishedAt } : {}),
             },
           });
 

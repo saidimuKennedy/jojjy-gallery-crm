@@ -32,6 +32,9 @@ export default async function handler(
 
   const form = formidable({
     maxFileSize: 100 * 1024 * 1024,
+    // Server-side audio gate (the dashboard accept hint is client-only).
+    filter: ({ mimetype }) =>
+      !mimetype || mimetype.startsWith("audio/"),
   });
 
   try {
@@ -39,7 +42,7 @@ export default async function handler(
     if (!files.file || files.file.length === 0) {
       return res
         .status(400)
-        .json({ success: false, message: "No file uploaded." });
+        .json({ success: false, message: "No audio file uploaded (max 100MB)." });
     }
 
     const uploadedFile = files.file[0];
@@ -64,8 +67,7 @@ export default async function handler(
     console.error("music audio upload", error);
     return res.status(500).json({
       success: false,
-      message:
-        (error as Error).message || "Failed to upload audio to Cloudinary.",
+      message: "Failed to upload audio.",
     });
   }
 }

@@ -82,6 +82,21 @@ export default async function handler(
         });
       }
 
+      const priceNum = typeof price === "number" ? price : parseFloat(price);
+      if (!Number.isFinite(priceNum) || priceNum < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "price must be 0 or more",
+        });
+      }
+      const qtyNum = typeof quantity === "number" ? quantity : Number(quantity);
+      if (!Number.isInteger(qtyNum) || qtyNum < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "quantity must be a whole number of 0 or more",
+        });
+      }
+
       const event = await prisma.event.findUnique({ where: { id: eventId } });
       if (!event) {
         return res
@@ -93,8 +108,8 @@ export default async function handler(
         data: {
           eventId,
           name,
-          price: parseFloat(price),
-          quantity: parseInt(quantity, 10),
+          price: priceNum,
+          quantity: qtyNum,
           salesStart: parsedStart,
           salesEnd: parsedEnd,
         },
@@ -135,6 +150,13 @@ export default async function handler(
         return res
           .status(404)
           .json({ success: false, message: "Ticket type not found" });
+      }
+      if (existing.quantitySold > 0) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "Tickets of this type have been sold; it cannot be deleted. Close sales with a sales window instead.",
+        });
       }
 
       await prisma.ticketType.delete({ where: { id: ticketTypeId } });

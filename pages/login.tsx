@@ -11,12 +11,18 @@ export default function LoginPage() {
   const { status } = useSession();
   const router = useRouter();
 
+  // Only same-origin paths are valid login destinations.
+  const rawCallback =
+    typeof router.query.callbackUrl === "string"
+      ? router.query.callbackUrl
+      : "/dashboard";
+  const callbackUrl =
+    rawCallback.startsWith("/") && !rawCallback.startsWith("//")
+      ? rawCallback
+      : "/dashboard";
+
   useEffect(() => {
     if (status === "authenticated") {
-      const callbackUrl =
-        typeof router.query.callbackUrl === "string"
-          ? router.query.callbackUrl
-          : "/dashboard";
       router.replace(callbackUrl);
     }
   }, [status, router]);
@@ -33,11 +39,6 @@ export default function LoginPage() {
     e.preventDefault();
     setError(null);
     setIsSubmitting(true);
-
-    const callbackUrl =
-      typeof router.query.callbackUrl === "string"
-        ? router.query.callbackUrl
-        : "/dashboard";
 
     const result = await signIn("credentials", {
       redirect: false,

@@ -9,6 +9,8 @@ function serialize(release: {
   slug: string;
   title: string;
   description: string | null;
+  artistNotes: string | null;
+  studioNotes: string | null;
   coverImage: string | null;
   artistName: string;
   releaseType: MusicReleaseType;
@@ -42,6 +44,8 @@ function serialize(release: {
     slug: release.slug,
     title: release.title,
     description: release.description,
+    artistNotes: release.artistNotes,
+    studioNotes: release.studioNotes,
     coverImage: release.coverImage,
     artistName: release.artistName,
     releaseType: release.releaseType,
@@ -107,6 +111,8 @@ export default async function handler(
           title,
           slug,
           description,
+          artistNotes,
+          studioNotes,
           coverImage,
           artistName,
           releaseType,
@@ -127,19 +133,43 @@ export default async function handler(
             .json({ success: false, message: "title is required" });
         }
 
+        const requestedStatus =
+          (publishStatus as MusicPublishStatus) || "DRAFT";
+        if (
+          (requestedStatus === "PUBLISHED" || requestedStatus === "SCHEDULED") &&
+          !(await requirePermission(req, res, "music:publish"))
+        )
+          return;
+
         const releaseSlug = slug || slugify(title);
         const mode = (accessMode as MusicAccessMode) || "PAID";
+
+        if (
+          mode === "PAID" &&
+          (price === undefined ||
+            price === null ||
+            price === "" ||
+            !Number.isFinite(Number(price)) ||
+            Number(price) < 0)
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "Paid releases need a price of 0 or more",
+          });
+        }
 
         const created = await prisma.release.create({
           data: {
             title,
             slug: releaseSlug,
             description: description ?? null,
+            artistNotes: artistNotes ?? null,
+            studioNotes: studioNotes ?? null,
             coverImage: coverImage ?? null,
             artistName: artistName || "Jojjy Gallery",
             releaseType: (releaseType as MusicReleaseType) || "SINGLE",
             genre: genre ?? null,
-            publishStatus: (publishStatus as MusicPublishStatus) || "DRAFT",
+            publishStatus: requestedStatus,
             publishAt: publishAt ? new Date(publishAt) : null,
             explicit: !!explicit,
             releaseDate: releaseDate ? new Date(releaseDate) : null,

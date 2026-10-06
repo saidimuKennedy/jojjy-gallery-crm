@@ -17,5 +17,7 @@ export const config = {
     "/api/announcements/:path*",
     "/api/music/:path*",
     "/api/upload/:path*",
+    "/api/staff/:path*",
+    "/api/subscribers/:path*",
   ],
 };

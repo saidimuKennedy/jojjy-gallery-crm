@@ -31,7 +31,7 @@ export default async function handler(
       case "PUT": {
         if (!(await requirePermission(req, res, "artworks:write"))) return;
 
-        const { mediaFiles: _mediaFiles, ...artworkData } = req.body;
+        const { mediaFiles, ...artworkData } = req.body;
 
         const {
           title,
@@ -67,6 +67,12 @@ export default async function handler(
         }
 
         const updatedArtwork = await prisma.$transaction(async (tx) => {
+          const existing = await tx.artwork.findUnique({
+            where: { id: artworkId },
+          });
+          if (!existing) {
+            throw new Error("NOT_FOUND");
+          }
           await tx.artwork.update({
             where: { id: artworkId },
             data: {
@@ -77,17 +83,79 @@ export default async function handler(
               imageUrl,
               description,
               dimensions,
-              isAvailable: isAvailable ?? true,
-              status: status ?? "AVAILABLE",
+              // Preserve flags when omitted instead of forcing defaults, so a
+              // partial update can never accidentally (un)publish.
+              isAvailable: isAvailable ?? existing.isAvailable,
+              status: status ?? existing.status,
               medium,
               year: parseInt(year),
-              inGallery: inGallery ?? false,
+              inGallery: inGallery ?? existing.inGallery,
               seriesId:
                 seriesId !== "" && seriesId !== null && seriesId !== undefined
                   ? parseInt(seriesId)
                   : null,
             },
           });
+
+          if (Array.isArray(mediaFiles)) {
+            for (const mf of mediaFiles) {
+              if (
+                mf.type !== "IMAGE" &&
+                mf.type !== "VIDEO" &&
+                mf.type !== "AUDIO"
+              ) {
+                throw new Error(
+                  `INVALID_MEDIA_TYPE: "${mf.type}" — use IMAGE, VIDEO, or AUDIO.`
+                );
+              }
+              if (!mf.url) {
+                throw new Error("INVALID_MEDIA: every media file needs a url.");
+              }
+            }
+            const incomingIds = new Set(
+              mediaFiles.filter((mf: { id?: number }) => mf.id).map((mf: { id: number }) => mf.id)
+            );
+            await tx.artworkMediaFile.deleteMany({
+              where: {
+                artworkId,
+                id: { notIn: [...incomingIds] },
+              },
+            });
+            for (const [index, mf] of (
+              mediaFiles as {
+                id?: number;
+                url: string;
+                type: "IMAGE" | "VIDEO" | "AUDIO";
+                description?: string | null;
+                thumbnailUrl?: string | null;
+                order?: number;
+              }[]
+            ).entries()) {
+              if (mf.id) {
+                await tx.artworkMediaFile.updateMany({
+                  where: { id: mf.id, artworkId },
+                  data: {
+                    url: mf.url,
+                    type: mf.type,
+                    description: mf.description ?? null,
+                    thumbnailUrl: mf.thumbnailUrl ?? null,
+                    order: mf.order ?? index,
+                  },
+                });
+              } else {
+                await tx.artworkMediaFile.create({
+                  data: {
+                    artworkId,
+                    url: mf.url,
+                    type: mf.type,
+                    description: mf.description ?? null,
+                    thumbnailUrl: mf.thumbnailUrl ?? null,
+                    order: mf.order ?? index,
+                  },
+                });
+              }
+            }
+          }
 
           return tx.artwork.findUnique({
             where: { id: artworkId },
@@ -111,6 +179,16 @@ export default async function handler(
       case "DELETE": {
         if (!(await requirePermission(req, res, "artworks:write"))) return;
 
+        const referenced = await prisma.orderItem.count({
+          where: { artworkId },
+        });
+        if (referenced > 0) {
+          return res.status(409).json({
+            success: false,
+            message:
+              "This artwork has ordered items and cannot be deleted. Mark it Sold instead.",
+          });
+        }
         await prisma.artwork.delete({
           where: { id: artworkId },
         });
@@ -130,6 +208,13 @@ export default async function handler(
     }
   } catch (error) {
     console.error("Error handling artwork:", error);
+    const message = (error as Error).message || "Internal server error";
+    if (message === "NOT_FOUND") {
+      return res.status(404).json({ success: false, message: "Artwork not found" });
+    }
+    if (message.startsWith("INVALID_MEDIA") || message.startsWith("INVALID_MEDIA_TYPE")) {
+      return res.status(400).json({ success: false, message });
+    }
     return res.status(500).json({
       success: false,
       message: (error as Error).message || "Internal server error",

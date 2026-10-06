@@ -73,6 +73,24 @@ export default async function handler(
             .status(400)
             .json({ success: false, message: "trackId required" });
         }
+        const release = await prisma.release.findUnique({
+          where: { id: releaseId },
+          select: {
+            publishStatus: true,
+            _count: { select: { tracks: true } },
+          },
+        });
+        if (
+          release &&
+          (release.publishStatus === "PUBLISHED" ||
+            release.publishStatus === "SCHEDULED") &&
+          release._count.tracks <= 1
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "A published release must keep at least one track",
+          });
+        }
         await prisma.track.deleteMany({
           where: { id: trackId, releaseId },
         });

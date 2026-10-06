@@ -76,6 +76,8 @@ export default async function handler(
           title,
           slug,
           description,
+          artistNotes,
+          studioNotes,
           coverImage,
           artistName,
           releaseType,
@@ -126,6 +128,19 @@ export default async function handler(
           existing.accessPolicy?.accessMode ||
           "PAID";
 
+        if (
+          mode === "PAID" &&
+          price !== undefined &&
+          price !== null &&
+          price !== "" &&
+          (!Number.isFinite(Number(price)) || Number(price) < 0)
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "Paid releases need a price of 0 or more",
+          });
+        }
+
         const updated = await prisma.release.update({
           where: { id },
           data: {
@@ -133,6 +148,10 @@ export default async function handler(
             slug: slug ?? existing.slug,
             description:
               description !== undefined ? description : existing.description,
+            artistNotes:
+              artistNotes !== undefined ? artistNotes : existing.artistNotes,
+            studioNotes:
+              studioNotes !== undefined ? studioNotes : existing.studioNotes,
             coverImage:
               coverImage !== undefined ? coverImage : existing.coverImage,
             artistName: artistName ?? existing.artistName,
@@ -167,12 +186,15 @@ export default async function handler(
                 },
                 update: {
                   accessMode: mode,
+                  // Leaving PAID clears any stale price, mirroring create.
                   price:
-                    price !== undefined
-                      ? price === null || price === ""
-                        ? null
-                        : Number(price)
-                      : undefined,
+                    mode !== "PAID"
+                      ? null
+                      : price !== undefined
+                        ? price === null || price === ""
+                          ? null
+                          : Number(price)
+                        : undefined,
                   currency: currency || undefined,
                   paidPlayLimit:
                     paidPlayLimit != null ? Number(paidPlayLimit) : undefined,

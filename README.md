@@ -56,6 +56,9 @@ Sign in at `/login`. Dashboard routes under `/dashboard/*` require a session.
 | `DIRECT_URL` | Direct (non-pooled) URL for Prisma CLI / migrations (`prisma.config.js`) |
 | `NEXTAUTH_SECRET` | NextAuth signing secret |
 | `NEXTAUTH_URL` | Public origin of this CRM app (e.g. `http://localhost:3001`) |
+| `CLOUDINARY_CLOUD_NAME` | Image/track uploads |
+| `CLOUDINARY_API_KEY` | Image/track uploads |
+| `CLOUDINARY_API_SECRET` | Image/track uploads |
 
 ## Stack
 

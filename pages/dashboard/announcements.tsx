@@ -179,7 +179,7 @@ export default function AnnouncementsPage() {
       </Head>
       <PageHeader
         title="Announcements"
-        description="Fan updates via on-site, email, and WhatsApp."
+        description="Fan updates published to the on-site feed."
       >
         <button
           type="button"

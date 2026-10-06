@@ -96,12 +96,69 @@ export default async function handler(
           : null;
         if (status === "CANCELLED") {
           eventStatus = "CANCELLED";
+          storedPublishAt = null;
         } else if (status === "PUBLISHED") {
           eventStatus = "PUBLISHED";
           storedPublishAt = null;
         }
 
         const eventSlug = slug || slugify(title);
+
+        // Inline ticket types get the same validation as the dedicated
+        // ticket-type routes: no negative/NaN price or quantity, and a sane
+        // sales window.
+        const inlineTickets = (ticketTypes ?? []).map(
+          (tt: {
+            name: string;
+            price: number | string;
+            quantity: number;
+            salesStart?: string | null;
+            salesEnd?: string | null;
+          }) => {
+            const price =
+              typeof tt.price === "number" ? tt.price : parseFloat(tt.price);
+            const quantity =
+              typeof tt.quantity === "number" ? tt.quantity : Number(tt.quantity);
+            const salesStart = tt.salesStart ? new Date(tt.salesStart) : null;
+            const salesEnd = tt.salesEnd ? new Date(tt.salesEnd) : null;
+            return { name: tt.name, price, quantity, salesStart, salesEnd };
+          }
+        );
+        for (const tt of inlineTickets) {
+          if (!tt.name || !Number.isFinite(tt.price) || tt.price < 0) {
+            return res.status(400).json({
+              success: false,
+              message: "Each ticket type needs a name and a price of 0 or more.",
+            });
+          }
+          if (!Number.isInteger(tt.quantity) || tt.quantity < 0) {
+            return res.status(400).json({
+              success: false,
+              message: `Ticket type "${tt.name}" needs a whole-number quantity of 0 or more.`,
+            });
+          }
+          if (
+            tt.salesStart &&
+            tt.salesEnd &&
+            (isNaN(tt.salesStart.getTime()) ||
+              isNaN(tt.salesEnd.getTime()) ||
+              tt.salesEnd <= tt.salesStart)
+          ) {
+            return res.status(400).json({
+              success: false,
+              message: `Ticket type "${tt.name}" needs salesEnd after salesStart.`,
+            });
+          }
+          if (
+            (tt.salesStart && isNaN(tt.salesStart.getTime())) ||
+            (tt.salesEnd && isNaN(tt.salesEnd.getTime()))
+          ) {
+            return res.status(400).json({
+              success: false,
+              message: `Ticket type "${tt.name}" has an invalid sales date.`,
+            });
+          }
+        }
 
         const created = await prisma.event.create({
           data: {
@@ -117,26 +174,8 @@ export default async function handler(
             directions: directions ?? null,
             openingHours: openingHours ?? null,
             artistTalkAt: artistTalkAt ? new Date(artistTalkAt) : null,
-            ticketTypes: ticketTypes?.length
-              ? {
-                  create: ticketTypes.map(
-                    (tt: {
-                      name: string;
-                      price: number | string;
-                      quantity: number;
-                      salesStart?: string | null;
-                      salesEnd?: string | null;
-                    }) => ({
-                      name: tt.name,
-                      price: parseFloat(String(tt.price)),
-                      quantity: Number(tt.quantity),
-                      salesStart: tt.salesStart
-                        ? new Date(tt.salesStart)
-                        : null,
-                      salesEnd: tt.salesEnd ? new Date(tt.salesEnd) : null,
-                    })
-                  ),
-                }
+            ticketTypes: inlineTickets.length
+              ? { create: inlineTickets }
               : undefined,
           },
           include: {

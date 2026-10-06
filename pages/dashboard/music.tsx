@@ -18,6 +18,8 @@ type ReleaseRow = {
   slug: string;
   title: string;
   description: string | null;
+  artistNotes: string | null;
+  studioNotes: string | null;
   coverImage: string | null;
   artistName: string;
   releaseType: string;
@@ -48,6 +50,8 @@ type ReleaseForm = {
   title: string;
   slug: string;
   description: string;
+  artistNotes: string;
+  studioNotes: string;
   coverImage: string;
   artistName: string;
   releaseType: string;
@@ -62,6 +66,8 @@ const emptyForm = (): ReleaseForm => ({
   title: "",
   slug: "",
   description: "",
+  artistNotes: "",
+  studioNotes: "",
   coverImage: "",
   artistName: "Jojjy Gallery",
   releaseType: "SINGLE",
@@ -123,6 +129,8 @@ export default function MusicPage() {
         title: editing.title,
         slug: editing.slug,
         description: editing.description || "",
+        artistNotes: editing.artistNotes || "",
+        studioNotes: editing.studioNotes || "",
         coverImage: editing.coverImage || "",
         artistName: editing.artistName,
         releaseType: editing.releaseType,
@@ -166,6 +174,8 @@ export default function MusicPage() {
         title: form.title,
         slug: form.slug || undefined,
         description: form.description || null,
+        artistNotes: form.artistNotes || null,
+        studioNotes: form.studioNotes || null,
         coverImage: form.coverImage || null,
         artistName: form.artistName,
         releaseType: form.releaseType,
@@ -548,6 +558,28 @@ export default function MusicPage() {
                   value={form.description}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, description: e.target.value }))
+                  }
+                />
+              </label>
+              <label className={labelClass}>
+                Artist notes (public liner notes)
+                <textarea
+                  className={inputClass}
+                  rows={3}
+                  value={form.artistNotes}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, artistNotes: e.target.value }))
+                  }
+                />
+              </label>
+              <label className={labelClass}>
+                Studio notes (members/owners only)
+                <textarea
+                  className={inputClass}
+                  rows={3}
+                  value={form.studioNotes}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, studioNotes: e.target.value }))
                   }
                 />
               </label>

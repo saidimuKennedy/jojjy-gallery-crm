@@ -27,6 +27,9 @@ interface MediaBlogEntryFormData {
   thumbnailUrl: string;
   duration: string;
   content: string;
+  // Staff-facing publication toggle. true = public (publishedAt set),
+  // false = DRAFT (publishedAt null, never shown publicly).
+  published: boolean;
   mediaFiles: MediaBlogFileFormData[];
 }
 
@@ -38,6 +41,7 @@ const initialFormData: MediaBlogEntryFormData = {
   thumbnailUrl: "",
   duration: "",
   content: "",
+  published: true,
   mediaFiles: [],
 };
 
@@ -77,6 +81,7 @@ const MediaBlogManagement = () => {
         thumbnailUrl: editingEntry.thumbnailUrl || "",
         duration: editingEntry.duration || "",
         content: editingEntry.content || "",
+        published: !!editingEntry.publishedAt,
         mediaFiles:
           editingEntry.mediaFiles?.map((mf) => ({
             id: mf.id,
@@ -176,12 +181,20 @@ const MediaBlogManagement = () => {
     const url = editingEntry ? `/api/media-blog/${editingEntry.id}` : "/api/media-blog";
 
     try {
+      // Map the staff toggle to an explicit publishedAt: false (DRAFT) sends
+      // null; true keeps the existing timestamp or publishes now.
+      const payload = {
+        ...formData,
+        publishedAt: formData.published
+          ? editingEntry?.publishedAt ?? new Date().toISOString()
+          : null,
+      };
       const res = await fetch(url, {
         method,
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(payload),
       });
 
       const data: APIError | MediaBlogEntryWithRelations = await res.json();
@@ -282,6 +295,9 @@ const MediaBlogManagement = () => {
                   Type
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Short Description
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -303,6 +319,17 @@ const MediaBlogManagement = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {entry.type}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {entry.publishedAt ? (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        Published
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                        Draft
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-500 max-w-xs">
                     <div className="truncate" title={entry.shortDesc || ""}>
@@ -400,11 +427,32 @@ const MediaBlogManagement = () => {
                     ))}
                   </select>
                 </div>
+                <div className="flex items-start gap-3 border border-gray-300 px-3 py-3">
+                  <input
+                    type="checkbox"
+                    id="published"
+                    name="published"
+                    checked={formData.published}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        published: e.target.checked,
+                      }))
+                    }
+                    className="mt-1"
+                  />
+                  <label htmlFor="published" className="text-sm text-black">
+                    <span className="font-medium">Published</span>
+                    <span className="block text-gray-500">
+                      Uncheck to keep this entry as a private draft — drafts
+                      never appear on the public site, homepage, or sitemap.
+                    </span>
+                  </label>
+                </div>
                 <div>
                   <label htmlFor="shortDesc" className="block text-sm font-medium text-black mb-2">
                     Short Description
-                  </label>
-                  <textarea
+                  </label>                  <textarea
                     id="shortDesc"
                     name="shortDesc"
                     value={formData.shortDesc}

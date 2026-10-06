@@ -58,6 +58,7 @@ export default async function handler(
         const {
           id,
           name,
+          slug,
           description,
           introduction,
           artistStatement,
@@ -73,10 +74,26 @@ export default async function handler(
           return res.status(400).json({ message: "Series name is required." });
         }
 
+        if (filmUrl) {
+          try {
+            const host = new URL(filmUrl).hostname.replace(/^www\./, "");
+            if (!host.endsWith("youtube.com") && host !== "youtu.be" && !host.endsWith("vimeo.com")) {
+              return res.status(400).json({
+                message: "Film URL must be a YouTube or Vimeo link to embed.",
+              });
+            }
+          } catch {
+            return res.status(400).json({ message: "Film URL is not a valid URL." });
+          }
+        }
+
         const updatedSeries = await prisma.series.update({
           where: { id },
           data: {
             name,
+            // Persist renames to the URL slug when the form sends one, so the
+            // public /portfolio/:slug route follows the new name.
+            ...(typeof slug === "string" && slug.trim() ? { slug: slug.trim() } : {}),
             description: description || "",
             introduction: introduction || null,
             artistStatement: artistStatement || null,
@@ -88,6 +105,9 @@ export default async function handler(
         console.error("Error updating series:", error);
         if ((error as { code?: string }).code === "P2025") {
           return res.status(404).json({ message: "Series not found." });
+        }
+        if ((error as { code?: string }).code === "P2002") {
+          return res.status(409).json({ message: "Another series already uses that slug." });
         }
         return res.status(500).json({ message: "Failed to update series" });
       }

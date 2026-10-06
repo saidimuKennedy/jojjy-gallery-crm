@@ -41,6 +41,15 @@ export default async function handler(
 
         const { mediaFiles, ...entryData } = req.body;
 
+        // publishedAt null = DRAFT (never public). Absent on create preserves
+        // the previous behaviour: new entries go live immediately.
+        const publishedAt =
+          entryData.publishedAt === null
+            ? null
+            : entryData.publishedAt
+              ? new Date(entryData.publishedAt)
+              : new Date();
+
         const newEntry = await prisma.$transaction(async (tx) => {
           const createdEntry = await tx.mediaBlogEntry.create({
             data: {
@@ -48,6 +57,7 @@ export default async function handler(
               shortDesc: entryData.shortDesc,
               type: entryData.type as MediaBlogEntryType,
               externalLink: entryData.externalLink,
+              publishedAt,
               mediaFiles: {
                 create: (mediaFiles || []).map(
                   (

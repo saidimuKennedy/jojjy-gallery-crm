@@ -360,7 +360,11 @@ export default function EventsPage() {
   };
 
   const handleCancelEvent = async () => {
-    if (!confirm("Cancel this event? This cannot be undone via the form."))
+    if (
+      !confirm(
+        "Cancel this event? It will immediately disappear from the public site. You can re-publish it later with Publish now."
+      )
+    )
       return;
     await save("CANCELLED");
   };

@@ -178,6 +178,21 @@ export default async function handler(
       });
     }
 
+    for (const mf of mediaFiles || []) {
+      if (mf.type !== "IMAGE" && mf.type !== "VIDEO" && mf.type !== "AUDIO") {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid media type "${mf.type}" — use IMAGE, VIDEO, or AUDIO.`,
+        });
+      }
+      if (!mf.url) {
+        return res.status(400).json({
+          success: false,
+          message: "Every media file needs a url.",
+        });
+      }
+    }
+
     const newArtwork = await prisma.$transaction(async (tx) => {
       const createdArtwork = await tx.artwork.create({
         data: {

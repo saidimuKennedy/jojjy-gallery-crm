@@ -41,7 +41,7 @@ const ARTWORK_STATUS_OPTIONS: { value: ArtworkStatusValue; label: string }[] = [
 interface ArtworkMediaFilePayload {
   id?: number;
   url: string;
-  type: "IMAGE" | "VIDEO" | "AUDIO" | "3D_MODEL" | "EXTERNAL_LINK";
+  type: "IMAGE" | "VIDEO" | "AUDIO";
   description: string | null;
   thumbnailUrl: string | null;
   order?: number;
@@ -921,8 +921,6 @@ const ArtworksManagement = () => {
                           <option value="IMAGE">Image</option>
                           <option value="VIDEO">Video</option>
                           <option value="AUDIO">Audio</option>
-                          <option value="3D_MODEL">3D Model</option>
-                          <option value="EXTERNAL_LINK">External Link</option>
                         </select>
                       </div>
                       <div>

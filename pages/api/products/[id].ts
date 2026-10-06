@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import prisma from "@/lib/prisma";
 import { requirePermission } from "@/lib/require-permission";
+import { validateVariants } from "@/lib/validate-variants";
 
 function serializeProduct(product: {
   id: number;
@@ -62,6 +63,26 @@ export default async function handler(
         });
       }
 
+      const checked = validateVariants(variants);
+      if (checked.error) {
+        return res.status(400).json({ success: false, message: checked.error });
+      }
+
+      if (Array.isArray(variants)) {
+        // Variants are replaced wholesale: refuse when existing variants back
+        // paid order history (their IDs would be destroyed by the replace).
+        const referenced = await prisma.orderItem.count({
+          where: { productVariant: { productId } },
+        });
+        if (referenced > 0) {
+          return res.status(409).json({
+            success: false,
+            message:
+              "This product has ordered items; variants cannot be replaced. Adjust stock instead.",
+          });
+        }
+      }
+
       const product = await prisma.$transaction(async (tx) => {
         await tx.product.update({
           where: { id: productId },
@@ -77,24 +98,16 @@ export default async function handler(
 
         if (Array.isArray(variants)) {
           await tx.productVariant.deleteMany({ where: { productId } });
-          if (variants.length > 0) {
+          if ((checked.variants ?? []).length > 0) {
             await tx.productVariant.createMany({
-              data: variants.map(
-                (v: {
-                  sku: string;
-                  size?: string | null;
-                  color?: string | null;
-                  price: number | string;
-                  stock?: number | string;
-                }) => ({
-                  productId,
-                  sku: v.sku,
-                  size: v.size || null,
-                  color: v.color || null,
-                  price: parseFloat(String(v.price)),
-                  stock: parseInt(String(v.stock ?? 0), 10),
-                })
-              ),
+              data: (checked.variants ?? []).map((v) => ({
+                productId,
+                sku: v.sku,
+                size: v.size,
+                color: v.color,
+                price: v.price,
+                stock: v.stock,
+              })),
             });
           }
         }
@@ -127,6 +140,16 @@ export default async function handler(
   if (req.method === "DELETE") {
     if (!(await requirePermission(req, res, "merch:write"))) return;
     try {
+      const referenced = await prisma.orderItem.count({
+        where: { productVariant: { productId } },
+      });
+      if (referenced > 0) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "This product has ordered items and cannot be deleted. Unpublish it instead (Available switch).",
+        });
+      }
       await prisma.product.delete({ where: { id: productId } });
       return res
         .status(200)

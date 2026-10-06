@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import prisma from "@/lib/prisma";
+import { validateVariants } from "@/lib/validate-variants";
 import { requirePermission } from "@/lib/require-permission";
 
 function serializeProduct(product: {
@@ -63,7 +64,7 @@ export default async function handler(
   if (req.method === "POST") {
     if (!(await requirePermission(req, res, "merch:write"))) return;
     try {
-      const { name, slug, description, imageUrl, category, variants } =
+      const { name, slug, description, imageUrl, category, isAvailable, variants } =
         req.body;
 
       if (!name || !slug) {
@@ -73,6 +74,11 @@ export default async function handler(
         });
       }
 
+      const checked = validateVariants(variants);
+      if (checked.error) {
+        return res.status(400).json({ success: false, message: checked.error });
+      }
+
       const product = await prisma.product.create({
         data: {
           name,
@@ -80,22 +86,15 @@ export default async function handler(
           description: description || null,
           imageUrl: imageUrl || null,
           category: category || null,
+          isAvailable: isAvailable ?? true,
           variants: {
-            create: (variants || []).map(
-              (v: {
-                sku: string;
-                size?: string | null;
-                color?: string | null;
-                price: number | string;
-                stock?: number | string;
-              }) => ({
-                sku: v.sku,
-                size: v.size || null,
-                color: v.color || null,
-                price: parseFloat(String(v.price)),
-                stock: parseInt(String(v.stock ?? 0), 10),
-              })
-            ),
+            create: (checked.variants ?? []).map((v) => ({
+              sku: v.sku,
+              size: v.size,
+              color: v.color,
+              price: v.price,
+              stock: v.stock,
+            })),
           },
         },
         include: { variants: true },

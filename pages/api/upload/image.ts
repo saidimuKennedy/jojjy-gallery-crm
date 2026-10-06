@@ -72,19 +72,32 @@ export default async function handler(
   ]);
   if (!auth) return;
 
-  const form = formidable({});
+  // Bound size and type server-side: raster images only (SVG can carry
+  // scripts and the public site renders stored URLs directly).
+  const ALLOWED_IMAGE_TYPES = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+  ]);
+  const form = formidable({
+    maxFileSize: 10 * 1024 * 1024,
+    filter: ({ mimetype }) => !mimetype || ALLOWED_IMAGE_TYPES.has(mimetype),
+  });
 
   try {
     const [fields, files] = await form.parse(req);
 
     if (!files.file || files.file.length === 0) {
-      return res
-        .status(400)
-        .json({ success: false, message: "No file uploaded." });
+      return res.status(400).json({
+        success: false,
+        message: "No file uploaded (JPEG, PNG, WebP, or GIF, max 10MB).",
+      });
     }
 
     const uploadedFile = files.file[0];
-    const folder = fieldValue(fields, "folder") || "artwork_uploads";
+    // Confine uploads to the CRM asset namespace; ignore client folders.
+    const folder = "crm_uploads";
     const publicIdBase = resolvePublicId(fields, uploadedFile.originalFilename);
 
     const cloudinaryResponse = await cloudinary.uploader.upload(
@@ -97,7 +110,7 @@ export default async function handler(
       }
     );
 
-    await fs.unlink(uploadedFile.filepath);
+    await fs.unlink(uploadedFile.filepath).catch(() => undefined);
 
     return res.status(200).json({
       success: true,
@@ -109,8 +122,7 @@ export default async function handler(
     console.error("Error uploading image to Cloudinary:", error);
     return res.status(500).json({
       success: false,
-      message:
-        (error as Error).message || "Failed to upload image to Cloudinary.",
+      message: "Failed to upload image.",
     });
   }
 }

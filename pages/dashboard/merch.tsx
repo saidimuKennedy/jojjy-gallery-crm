@@ -37,6 +37,7 @@ type ProductForm = {
   description: string;
   imageUrl: string;
   category: string;
+  isAvailable: boolean;
   variants: VariantForm[];
 };
 
@@ -54,6 +55,7 @@ const emptyForm = (): ProductForm => ({
   description: "",
   imageUrl: "",
   category: "",
+  isAvailable: true,
   variants: [emptyVariant()],
 });
 
@@ -88,6 +90,7 @@ export default function MerchPage() {
         description: editing.description || "",
         imageUrl: editing.imageUrl || "",
         category: editing.category || "",
+        isAvailable: editing.isAvailable,
         variants: editing.variants.length
           ? editing.variants.map((v) => ({
               sku: v.sku,
@@ -157,6 +160,7 @@ export default function MerchPage() {
         description: form.description || null,
         imageUrl: form.imageUrl || null,
         category: form.category || null,
+        isAvailable: form.isAvailable,
         variants: form.variants
           .filter((v) => v.sku && v.price !== "")
           .map((v) => ({
@@ -340,6 +344,23 @@ export default function MerchPage() {
                       setForm((p) => ({ ...p, description: e.target.value }))
                     }
                   />
+                </div>
+                <div className="sm:col-span-2 flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={form.isAvailable}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, isAvailable: e.target.checked }))
+                    }
+                    className="mt-1"
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium">Available in shop</span>
+                    <span className="block text-gray-500">
+                      Uncheck to hide this product from the public shop without
+                      deleting it.
+                    </span>
+                  </span>
                 </div>
               </div>
 
