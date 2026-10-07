@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import Head from "next/head";
 import useSWR from "swr";
-import { Plus, Edit3, Trash2, X, Upload } from "lucide-react";
+import { Plus, Edit3, Trash2, X } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { PageHeader } from "@/components/ComingSoon";
+import MediaUrlField from "@/components/Admin/MediaUrlField";
 
 type EventStatus = "DRAFT" | "PUBLISHED" | "CANCELLED" | "COMPLETED";
 
@@ -557,52 +558,13 @@ export default function EventsPage() {
                   />
                 </div>
                 <div className="sm:col-span-2">
-                  <label className={labelClass}>Image</label>
-                  <div className="mt-1 flex gap-2">
-                    <input
-                      className={inputClass + " !mt-0"}
-                      placeholder="https://…"
-                      value={form.imageUrl}
-                      onChange={(e) =>
-                        setForm((p) => ({ ...p, imageUrl: e.target.value }))
-                      }
-                    />
-                    <label className="inline-flex cursor-pointer items-center gap-1 border border-ink-300 px-3 text-sm">
-                      <Upload className="h-4 w-4" />
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          setFormError(null);
-                          try {
-                            const body = new FormData();
-                            body.append("file", file);
-                            const res = await fetch("/api/upload/image", {
-                              method: "POST",
-                              body,
-                            });
-                            const json = await res.json();
-                            if (!res.ok)
-                              throw new Error(json.message || "Upload failed");
-                            setForm((p) => ({ ...p, imageUrl: json.imageUrl }));
-                          } catch (err) {
-                            setFormError((err as Error).message);
-                          }
-                        }}
-                      />
-                    </label>
-                  </div>
-                  {form.imageUrl && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={form.imageUrl}
-                      alt=""
-                      className="mt-2 h-24 w-24 border border-ink-200 object-cover"
-                    />
-                  )}
+                  <MediaUrlField
+                    label="Image"
+                    value={form.imageUrl}
+                    onChange={(url) =>
+                      setForm((p) => ({ ...p, imageUrl: url }))
+                    }
+                  />
                 </div>
                 <div className="sm:col-span-2">
                   <label className={labelClass}>Description</label>

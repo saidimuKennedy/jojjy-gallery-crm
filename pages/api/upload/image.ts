@@ -69,6 +69,8 @@ export default async function handler(
   const auth = await requireAnyPermission(req, res, [
     "artworks:write",
     "music:write",
+    "merch:write",
+    "events:write",
   ]);
   if (!auth) return;
 

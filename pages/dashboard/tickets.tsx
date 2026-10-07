@@ -224,7 +224,7 @@ export default function TicketsPage() {
                       <tr key={tt.id} className="border-b border-ink-100">
                         <td className="px-4 py-3 font-medium">{tt.name}</td>
                         <td className="px-4 py-3">
-                          KES {Number(tt.price).toLocaleString()}
+                          USD {Number(tt.price).toLocaleString()}
                         </td>
                         <td className="px-4 py-3">{tt.quantity}</td>
                         <td className="px-4 py-3">{tt.quantitySold}</td>
@@ -281,7 +281,7 @@ export default function TicketsPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className={labelClass}>Price (KES)</label>
+                    <label className={labelClass}>Price (USD)</label>
                     <input
                       type="number"
                       min="0"
@@ -362,7 +362,7 @@ export default function TicketsPage() {
               />
             </div>
             <div>
-              <label className={labelClass}>Price (KES)</label>
+              <label className={labelClass}>Price (USD)</label>
               <input
                 type="number"
                 min="0"

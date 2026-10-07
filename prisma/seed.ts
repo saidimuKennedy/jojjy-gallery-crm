@@ -22,6 +22,8 @@ const DEFAULT_PERMISSIONS = [
   { key: "events:write", description: "Create/update events" },
   { key: "tickets:read", description: "View tickets" },
   { key: "tickets:write", description: "Manage ticket types and check-in" },
+  { key: "orders:read", description: "View orders and fulfilment" },
+  { key: "orders:write", description: "Mark orders fulfilled" },
   { key: "merch:read", description: "View merch" },
   { key: "merch:write", description: "Manage products and inventory" },
   { key: "announcements:read", description: "View announcements" },

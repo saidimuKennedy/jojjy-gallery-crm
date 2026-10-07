@@ -34,6 +34,7 @@ const NAV = [
   },
   { href: "/dashboard/events", label: "Events", icon: Calendar, permission: "events:read" },
   { href: "/dashboard/tickets", label: "Tickets", icon: Ticket, permission: "tickets:read" },
+  { href: "/dashboard/orders", label: "Orders", icon: ShoppingBag, permission: "orders:read" },
   { href: "/dashboard/merch", label: "Merch", icon: ShoppingBag, permission: "merch:read" },
   { href: "/dashboard/music", label: "Music", icon: Music, permission: "music:read" },
   {

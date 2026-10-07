@@ -4,6 +4,7 @@ import useSWR from "swr";
 import { Plus, Edit3, Trash2, X } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { PageHeader } from "@/components/ComingSoon";
+import MediaUrlField from "@/components/Admin/MediaUrlField";
 
 type VariantForm = {
   sku: string;
@@ -325,12 +326,11 @@ export default function MerchPage() {
                   />
                 </div>
                 <div className="sm:col-span-2">
-                  <label className={labelClass}>Image URL</label>
-                  <input
-                    className={inputClass}
+                  <MediaUrlField
+                    label="Image"
                     value={form.imageUrl}
-                    onChange={(e) =>
-                      setForm((p) => ({ ...p, imageUrl: e.target.value }))
+                    onChange={(url) =>
+                      setForm((p) => ({ ...p, imageUrl: url }))
                     }
                   />
                 </div>
@@ -414,7 +414,7 @@ export default function MerchPage() {
                         min="0"
                         step="0.01"
                         className={inputClass}
-                        placeholder="Price"
+                        placeholder="Price (USD)"
                         value={v.price}
                         onChange={(e) =>
                           updateVariant(i, "price", e.target.value)

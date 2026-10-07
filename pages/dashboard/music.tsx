@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import Head from "next/head";
 import useSWR from "swr";
-import { Plus, Edit3, Trash2, X, Upload } from "lucide-react";
+import { Plus, Edit3, Trash2, X } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { PageHeader } from "@/components/ComingSoon";
+import MediaUrlField from "@/components/Admin/MediaUrlField";
 
 type TrackRow = {
   id: number;
@@ -217,15 +218,6 @@ export default function MusicPage() {
       return;
     }
     mutate();
-  };
-
-  const uploadCover = async (file: File) => {
-    const body = new FormData();
-    body.append("file", file);
-    const res = await fetch("/api/upload/image", { method: "POST", body });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.message || "Cover upload failed");
-    setForm((f) => ({ ...f, coverImage: json.imageUrl }));
   };
 
   const addTrack = async () => {
@@ -657,33 +649,14 @@ export default function MusicPage() {
                 </label>
               </div>
               <label className={labelClass}>
-                Cover image URL
-                <div className="mt-1 flex gap-2">
-                  <input
-                    className={inputClass + " !mt-0"}
-                    value={form.coverImage}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, coverImage: e.target.value }))
-                    }
-                  />
-                  <label className="inline-flex cursor-pointer items-center gap-1 border border-ink-300 px-3 text-sm">
-                    <Upload className="h-4 w-4" />
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        try {
-                          await uploadCover(file);
-                        } catch (err) {
-                          setFormError((err as Error).message);
-                        }
-                      }}
-                    />
-                  </label>
-                </div>
+                <span className="sr-only">Cover image</span>
+                <MediaUrlField
+                  label="Cover image"
+                  value={form.coverImage}
+                  onChange={(url) =>
+                    setForm((f) => ({ ...f, coverImage: url }))
+                  }
+                />
               </label>
 
               {editing && (

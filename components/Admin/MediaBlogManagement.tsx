@@ -4,6 +4,7 @@ import { Plus, Edit3, Trash2, X, AlertCircle, Image, Video, Mic, ExternalLink, F
 import useSWR from "swr";
 import { APIError } from "@/types/api";
 import { MediaBlogEntry, MediaBlogFile, MediaBlogEntryType, MediaFileType } from "@prisma/client";
+import MediaUrlField from "@/components/Admin/MediaUrlField";
 
 export type MediaBlogEntryWithRelations = MediaBlogEntry & {
   mediaFiles: MediaBlogFile[];
@@ -175,6 +176,11 @@ const MediaBlogManagement = () => {
     e.preventDefault();
     setSubmitError(null);
     setSuccessMessage(null);
+
+    if (formData.mediaFiles.some((mf) => !mf.url.trim())) {
+      setSubmitError("Every media file needs a file (upload or link).");
+      return;
+    }
     setIsSubmitting(true);
 
     const method = editingEntry ? "PUT" : "POST";
@@ -480,17 +486,12 @@ const MediaBlogManagement = () => {
                  {(formData.type === MediaBlogEntryType.VIDEO || formData.type === MediaBlogEntryType.AUDIO) && (
                   <>
                     <div>
-                      <label htmlFor="thumbnailUrl" className="block text-sm font-medium text-black mb-2">
-                        Thumbnail URL (for video/audio cover)
-                      </label>
-                      <input
-                        type="url"
-                        id="thumbnailUrl"
-                        name="thumbnailUrl"
+                      <MediaUrlField
+                        label="Thumbnail (for video/audio cover)"
                         value={formData.thumbnailUrl}
-                        onChange={handleChange}
-                        className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
-                        placeholder="https://example.com/thumbnail.jpg"
+                        onChange={(url) =>
+                          setFormData((prev) => ({ ...prev, thumbnailUrl: url }))
+                        }
                       />
                     </div>
                     <div>
@@ -540,20 +541,22 @@ const MediaBlogManagement = () => {
                         <X className="w-5 h-5" />
                       </button>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label htmlFor={`media-url-${index}`} className="block text-sm font-medium text-black mb-2">
-                            URL
-                          </label>
-                          <input
-                            type="url"
-                            id={`media-url-${index}`}
-                            name="url"
-                            value={mediaFile.url}
-                            onChange={(e) => handleMediaFileChange(index, e)}
-                            required
-                            className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
-                          />
-                        </div>
+                      <div>
+                        <MediaUrlField
+                          label="File URL"
+                          value={mediaFile.url}
+                          onChange={(url) =>
+                            setFormData((prev) => {
+                              const newMediaFiles = [...prev.mediaFiles];
+                              newMediaFiles[index] = {
+                                ...newMediaFiles[index],
+                                url,
+                              };
+                              return { ...prev, mediaFiles: newMediaFiles };
+                            })
+                          }
+                        />
+                      </div>
                         <div>
                           <label htmlFor={`media-type-${index}`} className="block text-sm font-medium text-black mb-2">
                             File Type
@@ -588,17 +591,19 @@ const MediaBlogManagement = () => {
                         </div>
                         {(mediaFile.type === MediaFileType.VIDEO || mediaFile.type === MediaFileType.AUDIO) && (
                           <div className="col-span-2">
-                            <label htmlFor={`media-thumbnail-${index}`} className="block text-sm font-medium text-black mb-2">
-                              Thumbnail URL (for file specific)
-                            </label>
-                            <input
-                              type="url"
-                              id={`media-thumbnail-${index}`}
-                              name="thumbnailUrl"
+                            <MediaUrlField
+                              label="File thumbnail"
                               value={mediaFile.thumbnailUrl || ""}
-                              onChange={(e) => handleMediaFileChange(index, e)}
-                              className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
-                              placeholder="https://example.com/file-thumbnail.jpg"
+                              onChange={(url) =>
+                                setFormData((prev) => {
+                                  const newMediaFiles = [...prev.mediaFiles];
+                                  newMediaFiles[index] = {
+                                    ...newMediaFiles[index],
+                                    thumbnailUrl: url,
+                                  };
+                                  return { ...prev, mediaFiles: newMediaFiles };
+                                })
+                              }
                             />
                           </div>
                         )}

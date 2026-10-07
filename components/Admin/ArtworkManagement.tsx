@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import { useArtworks, useSeriesList } from "@/hooks/useArtWorks";
 import { ArtworkWithRelations, Series, APIError } from "@/types/api";
+import MediaUrlField from "@/components/Admin/MediaUrlField";
+import { normalizeMediaUrl } from "@/lib/media-url";
 
 type ArtworkStatusValue =
   | "AVAILABLE"
@@ -840,6 +842,31 @@ const ArtworksManagement = () => {
                     onChange={handleFileChange}
                     className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
                   />
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      type="url"
+                      id="imageUrlLink"
+                      placeholder="…or paste an image link (Drive, Dropbox, URL)"
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter") return;
+                        e.preventDefault();
+                        const el = e.target as HTMLInputElement;
+                        const { url, error } = normalizeMediaUrl(el.value);
+                        if (error || !url) {
+                          setSubmitError(error || "Invalid link.");
+                          return;
+                        }
+                        setSubmitError(null);
+                        setFormData((prev) => ({
+                          ...prev,
+                          imageUrl: url,
+                          imageFile: null,
+                        }));
+                        el.value = "";
+                      }}
+                      className="w-full border border-gray-300 px-3 py-2 text-sm text-black focus:outline-none focus:border-black"
+                    />
+                  </div>
                   {formData.imageUrl && (
                     <div className="mt-4 flex items-center gap-4">
                       <img
@@ -886,21 +913,12 @@ const ArtworksManagement = () => {
                         <X size={18} />
                       </button>
                       <div>
-                        <label
-                          htmlFor={`media-url-${index}`}
-                          className="block text-xs font-medium text-black mb-1"
-                        >
-                          URL
-                        </label>
-                        <input
-                          type="text"
-                          id={`media-url-${index}`}
+                        <MediaUrlField
+                          label="File"
                           value={mf.url || ""}
-                          onChange={(e) =>
-                            handleMediaFileChange(index, "url", e.target.value)
+                          onChange={(url) =>
+                            handleMediaFileChange(index, "url", url)
                           }
-                          className="w-full border border-gray-300 px-2 py-1 text-black text-sm focus:outline-none focus:border-black"
-                          placeholder="Media URL"
                         />
                       </div>
                       <div>
