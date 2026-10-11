@@ -1,5 +1,6 @@
 import type { AppProps } from "next/app";
 import { SessionProvider } from "next-auth/react";
+import { Toaster } from "sonner";
 import "@/styles/globals.css";
 
 export default function App({
@@ -9,6 +10,8 @@ export default function App({
   return (
     <SessionProvider session={session}>
       <Component {...pageProps} />
+      {/* Bottom-left: the Assistant widget owns bottom-right. */}
+      <Toaster position="bottom-left" />
     </SessionProvider>
   );
 }

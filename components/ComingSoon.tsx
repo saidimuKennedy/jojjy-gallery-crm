@@ -13,7 +13,7 @@ export default function ComingSoon({
       {description ? (
         <p className="mt-2 text-sm text-ink-600 max-w-xl">{description}</p>
       ) : null}
-      <div className="mt-10 rounded-lg border border-dashed border-ink-300 bg-white px-6 py-16 text-center">
+      <div className="mt-10 rounded-2xl border border-dashed border-ink-200 bg-white px-6 py-16 text-center">
         <p className="text-sm font-medium text-ink-800">Coming soon</p>
         <p className="mt-1 text-sm text-ink-500">
           CRUD for this section will land here.

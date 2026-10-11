@@ -7,6 +7,7 @@ function serializeAnnouncement(a: {
   id: number;
   title: string;
   body: string;
+  imageUrl: string | null;
   eventId: number | null;
   publishedAt: Date | null;
   emailSentAt: Date | null;
@@ -53,7 +54,7 @@ export default async function handler(
   if (req.method === "POST") {
     if (!(await requirePermission(req, res, "announcements:write"))) return;
     try {
-      const { title, body, eventId, publishedAt, publish } = req.body ?? {};
+      const { title, body, imageUrl, eventId, publishedAt, publish } = req.body ?? {};
       if (!title || !body) {
         return res.status(400).json({
           success: false,
@@ -65,6 +66,7 @@ export default async function handler(
         data: {
           title,
           body,
+          imageUrl: typeof imageUrl === "string" && imageUrl.trim() ? imageUrl.trim() : null,
           eventId: eventId ? parseInt(String(eventId), 10) : null,
           publishedAt: resolvePublishedAt({ publish, publishedAt }, null),
         },

@@ -168,6 +168,10 @@ model Event {
   startsAt      DateTime
   endsAt        DateTime?
   status        EventStatus      @default(DRAFT)
+  /// Whether the event sells tickets or is RSVP-only. RSVP-only events must be
+  /// explicit (badges, no checkout link) rather than inferred from having no
+  /// ticket types.
+  ticketMode    EventTicketMode  @default(TICKETED)
   /// Optional schedule: DRAFT auto-flips to PUBLISHED once publishAt passes.
   publishAt     DateTime?
   /// Phase 2 richer event page fields.
@@ -246,39 +250,82 @@ model WishlistItem {
 
 /// A priced tier of tickets for an event (e.g. General Admission, VIP).
 model TicketType {
-  id           Int         @id @default(autoincrement())
-  eventId      Int
-  name         String
-  price        Decimal     @db.Decimal(10, 2)
-  quantity     Int
-  quantitySold Int         @default(0)
-  salesStart   DateTime?
-  salesEnd     DateTime?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  event        Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  tickets      Ticket[]
-  orderItems   OrderItem[]
+  id               Int         @id @default(autoincrement())
+  eventId          Int
+  name             String
+  description      String?
+  price            Decimal     @db.Decimal(10, 2)
+  quantity         Int
+  quantitySold     Int         @default(0)
+  /// Active (unexpired) reservations consuming this tier's allocation. Invariant:
+  /// quantitySold + quantityReserved <= quantity at all times.
+  quantityReserved Int         @default(0)
+  salesStart       DateTime?
+  salesEnd         DateTime?
+  /// Archived tiers are hidden from sale but kept for history once they have
+  /// orders/tickets. Never hard-deleted after first sale.
+  archivedAt       DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  event            Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  tickets          Ticket[]
+  orderItems       OrderItem[]
+  reservations     TicketReservation[]
 
   @@map("ticket_types")
 }
 
 /// One issued ticket, owned by a buyer, redeemable at the door via `code`.
 model Ticket {
-  id           String       @id @default(uuid())
-  ticketTypeId Int
-  userId       String
-  orderId      String
-  code         String       @unique
-  status       TicketStatus @default(VALID)
-  checkedInAt  DateTime?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  ticketType   TicketType   @relation(fields: [ticketTypeId], references: [id])
-  user         User         @relation(fields: [userId], references: [id])
-  order        Order        @relation(fields: [orderId], references: [id])
+  id                   String       @id @default(uuid())
+  ticketTypeId         Int
+  /// Nullable: guest checkout issues tickets without a User account.
+  userId               String?
+  orderId              String
+  code                 String       @unique
+  status               TicketStatus @default(VALID)
+  /// Source of the ticket, so reporting can separate paid from complimentary
+  /// issuance without re-deriving it from the order.
+  source               TicketSource @default(PAID)
+  /// Ticket-holder snapshot (defaults from buyer contact, per-attendee editable).
+  holderName           String?
+  holderEmail          String?
+  checkedInAt          DateTime?
+  /// CRM staff who recorded the current check-in state (null until checked in).
+  checkedInByCrmUserId String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  ticketType           TicketType   @relation(fields: [ticketTypeId], references: [id])
+  user                 User?        @relation(fields: [userId], references: [id])
+  order                Order        @relation(fields: [orderId], references: [id])
+  checkedInByCrmUser   CrmUser?     @relation("TicketCheckedInBy", fields: [checkedInByCrmUserId], references: [id])
+  checkIns             TicketCheckIn[]
+  refunds              Refund[]
 
+  @@index([orderId])
+  @@index([status])
   @@map("tickets")
+}
+
+/// A short-lived hold on ticket-type inventory created at checkout, before
+/// payment. Consumed on paid/complimentary issuance; released on expiry or
+/// failed/cancelled payment so capacity returns to the pool.
+model TicketReservation {
+  id           String            @id @default(uuid())
+  ticketTypeId Int
+  orderId      String
+  quantity     Int
+  status       ReservationStatus @default(ACTIVE)
+  expiresAt    DateTime
+  releasedAt   DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  ticketType   TicketType        @relation(fields: [ticketTypeId], references: [id])
+  order        Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status, expiresAt])
+  @@index([orderId])
+  @@map("ticket_reservations")
 }
 
 /// Merch item, managed from the CRM.
@@ -317,15 +364,30 @@ model ProductVariant {
 /// Unified purchase record for tickets, merch, music, and artwork.
 model Order {
   id              String          @id @default(uuid())
-  userId          String
+  /// Nullable: guest checkout never creates a User account.
+  userId          String?
   status          OrderStatus     @default(PENDING)
-  paymentProvider PaymentProvider
+  /// Payment state, separate from the order lifecycle (`status`) so guest
+  /// complimentary orders can be NOT_REQUIRED while paid orders track the
+  /// provider state independently. Merch/music/artwork statuses are unchanged.
+  paymentStatus   PaymentStatus   @default(PENDING)
+  /// Where the order came from. Complimentary issuance is zero-value and has no
+  /// payment provider.
+  source          OrderSource     @default(ONLINE)
+  /// Nullable only for zero-value complimentary issuance; paid orders set
+  /// PAYSTACK.
+  paymentProvider PaymentProvider?
   amount          Decimal         @db.Decimal(10, 2)
   currency        String          @default("KES")
   phoneNumber     String?
   /// Snapshot of the fulfilment contact as given at checkout (operator copy;
   /// never derived from the mutable User profile at fulfilment time).
   customerName    String?
+  /// Guest buyer contact snapshots. Email is required for guest ticket checkout;
+  /// phone is optional unless the payment method needs it.
+  guestName       String?
+  guestEmail      String?
+  guestPhone      String?
   deliveryNotes   String?
   paystackRef     String?         @unique
   /// Phase 2 delivery/logistics for physical items (merch, and later original
@@ -343,12 +405,25 @@ model Order {
   /// is UNFULFILLED until an operator marks it here. Tickets/digital access
   /// complete at payment and never use this field.
   fulfilledAt     DateTime?
+  /// Complimentary issuance attribution: the CRM staff actor and the required
+  /// reason. Stored as a scalar in both schemas; CRM adds the FK below.
+  issuedByCrmUserId String?
+  issueReason       String?
+  /// Guest ticket retrieval: a secure, unguessable token (emailed as a one-time
+  /// link) so tickets are never exposed by sequential id or email-only lookup.
+  retrievalToken          String?  @unique
+  retrievalTokenExpiresAt DateTime?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
-  user            User            @relation(fields: [userId], references: [id])
+  user            User?           @relation(fields: [userId], references: [id])
+  issuedByCrmUser CrmUser?        @relation("OrderIssuedBy", fields: [issuedByCrmUserId], references: [id])
   items           OrderItem[]
   tickets         Ticket[]
+  reservations    TicketReservation[]
+  refunds         Refund[]
 
+  @@index([guestEmail])
+  @@index([status])
   @@map("orders")
 }
 
@@ -366,6 +441,9 @@ model OrderItem {
   membershipPlanId Int?
   quantity         Int             @default(1)
   unitPrice        Decimal         @db.Decimal(10, 2)
+  /// Per-admission attendee snapshots for ticket items: [{ name, email }].
+  /// One entry per issued ticket; falls back to the buyer contact when empty.
+  attendees        Json?
   createdAt        DateTime        @default(now())
   order            Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productVariant   ProductVariant? @relation(fields: [productVariantId], references: [id])
@@ -384,6 +462,7 @@ model Announcement {
   id             Int       @id @default(autoincrement())
   title          String
   body           String
+  imageUrl       String?
   eventId        Int?
   publishedAt    DateTime?
   emailSentAt    DateTime?
@@ -444,8 +523,75 @@ enum OrderStatus {
   REFUNDED
 }
 
+/// Where an order came from. Existing orders default to ONLINE.
+enum OrderSource {
+  ONLINE
+  CRM_COMPLIMENTARY
+}
+
+/// Payment state, kept separate from the order lifecycle. `status` keeps its
+/// existing meaning for merch/music/artwork compatibility.
+enum PaymentStatus {
+  NOT_REQUIRED
+  PENDING
+  SUCCESS
+  FAILED
+  CANCELLED
+  REFUND_PENDING
+  PARTIALLY_REFUNDED
+  REFUNDED
+  NEEDS_ATTENTION
+}
+
+enum TicketSource {
+  PAID
+  COMPLIMENTARY
+}
+
+enum EventTicketMode {
+  TICKETED
+  RSVP_ONLY
+}
+
+enum ReservationStatus {
+  ACTIVE
+  CONSUMED
+  RELEASED
+}
+
 enum PaymentProvider {
   PAYSTACK
+}
+
+/// Refund lifecycle. A request stays REQUESTED until a *different* authorized
+/// staff member approves it; only then is it submitted to Paystack. Provider
+/// callbacks move it through SUBMITTED/PROCESSING to a terminal state.
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  SUBMITTED
+  PROCESSING
+  PROCESSED
+  FAILED
+  NEEDS_ATTENTION
+}
+
+/// Append-only refund history rows. Never deleted or overwritten.
+enum RefundEventType {
+  REQUESTED
+  APPROVED
+  REJECTED
+  SUBMITTED
+  PROVIDER_UPDATE
+  PROCESSED
+  FAILED
+  NEEDS_ATTENTION
+}
+
+enum CheckInAction {
+  CHECK_IN
+  REVERSAL
 }
 
 enum OrderItemType {
@@ -673,6 +819,14 @@ model CrmUser {
   sessions     CrmSession[]
   roles        CrmUserRole[]
   permissions  CrmUserPermission[]
+  // Plan 15 operational attribution.
+  issuedOrders     Order[]          @relation("OrderIssuedBy")
+  requestedRefunds Refund[]         @relation("RefundRequester")
+  approvedRefunds  Refund[]         @relation("RefundApprover")
+  checkIns         TicketCheckIn[]
+  ticketCheckState Ticket[]         @relation("TicketCheckedInBy")
+  auditLogs        CrmAuditLog[]
+  refundEvents     RefundEvent[]
 
   @@map("crm_users")
 }
@@ -738,4 +892,99 @@ model CrmUserPermission {
 
   @@id([userId, permissionId])
   @@map("crm_user_permissions")
+}
+
+// ---------------------------------------------------------------------------
+// Plan 15 — ticketing operations: refunds, check-in audit, CRM audit log.
+// CRM-only models; the public gallery app never reads them.
+// ---------------------------------------------------------------------------
+
+/// A refund request against a paid order, optionally scoped to specific tickets.
+/// Immutable audit trail lives in RefundEvent.
+model Refund {
+  id                     String        @id @default(uuid())
+  orderId                String
+  /// Null for order-scoped refunds; set for ticket-scoped refunds.
+  ticketId               String?
+  amount                 Decimal       @db.Decimal(10, 2)
+  currency               String
+  reason                 String
+  status                 RefundStatus  @default(REQUESTED)
+  requesterCrmUserId     String
+  approverCrmUserId      String?
+  requestedAt            DateTime      @default(now())
+  approvedAt             DateTime?
+  submittedAt            DateTime?
+  settledAt              DateTime?
+  /// Original Paystack transaction reference (server-derived, never client).
+  paystackTransactionRef String?
+  /// Paystack refund identifier returned by the Refund API.
+  paystackRefundId       String?       @unique
+  /// Last provider-reported status string, for display/reconciliation.
+  providerStatus         String?
+  failureReason          String?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+  order                  Order         @relation(fields: [orderId], references: [id])
+  ticket                 Ticket?       @relation(fields: [ticketId], references: [id])
+  requester              CrmUser       @relation("RefundRequester", fields: [requesterCrmUserId], references: [id])
+  approver               CrmUser?      @relation("RefundApprover", fields: [approverCrmUserId], references: [id])
+  events                 RefundEvent[]
+
+  @@index([status])
+  @@index([orderId])
+  @@map("refunds")
+}
+
+/// Append-only refund history. Never updated or deleted by staff operations.
+model RefundEvent {
+  id             String          @id @default(uuid())
+  refundId       String
+  type           RefundEventType
+  status         RefundStatus?
+  message        String?
+  providerStatus String?
+  /// Null for provider/webhook-driven events.
+  actorCrmUserId String?
+  data           Json?
+  createdAt      DateTime        @default(now())
+  refund         Refund          @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  actor          CrmUser?        @relation(fields: [actorCrmUserId], references: [id])
+
+  @@index([refundId])
+  @@map("refund_events")
+}
+
+/// Append-only check-in audit. A correction adds a REVERSAL row and a fresh
+/// CHECK_IN row; the original scan is never erased.
+model TicketCheckIn {
+  id        String        @id @default(uuid())
+  ticketId  String
+  action    CheckInAction
+  crmUserId String
+  reason    String?
+  createdAt DateTime      @default(now())
+  ticket    Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  crmUser   CrmUser       @relation(fields: [crmUserId], references: [id])
+
+  @@index([ticketId])
+  @@map("ticket_check_ins")
+}
+
+/// Append-only CRM audit log for high-impact actions.
+model CrmAuditLog {
+  id             String   @id @default(uuid())
+  actorCrmUserId String?
+  action         String
+  targetType     String
+  targetId       String?
+  before         Json?
+  after          Json?
+  reason         String?
+  createdAt      DateTime @default(now())
+  actor          CrmUser? @relation(fields: [actorCrmUserId], references: [id])
+
+  @@index([targetType, targetId])
+  @@index([action])
+  @@map("crm_audit_logs")
 }

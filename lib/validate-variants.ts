@@ -3,6 +3,7 @@
 
 export interface VariantInput {
   sku: string;
+  skuAuto?: boolean;
   size?: string | null;
   color?: string | null;
   price: number | string;
@@ -11,6 +12,7 @@ export interface VariantInput {
 
 export interface CleanVariant {
   sku: string;
+  skuAuto: boolean;
   size: string | null;
   color: string | null;
   price: number;
@@ -41,6 +43,7 @@ export function validateVariants(
     }
     cleaned.push({
       sku,
+      skuAuto: v.skuAuto === true,
       size: v.size || null,
       color: v.color || null,
       price,

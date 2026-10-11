@@ -3,8 +3,25 @@ import Head from "next/head";
 import { GetServerSideProps } from "next";
 import { getServerSession } from "next-auth/next";
 import useSWR from "swr";
+import { Plus } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
-import { PageHeader } from "@/components/ComingSoon";
+import {
+  Alert,
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  Field,
+  Modal,
+  PageHeader,
+  SectionHeading,
+  Select,
+  StatusBadge,
+  Table,
+  Td,
+  TextField,
+  Th,
+} from "@/components/ui";
 import { authOptions } from "@/lib/auth-options";
 import prisma from "@/lib/prisma";
 
@@ -16,7 +33,7 @@ type RoleRow = {
   userCount: number;
 };
 
-type PermissionRow = {
+type CatalogRow = {
   id: string;
   key: string;
   description: string | null;
@@ -33,7 +50,6 @@ type StaffUser = {
 
 type Props = {
   roles: RoleRow[];
-  permissions: PermissionRow[];
   loadError: string | null;
   canManage: boolean;
 };
@@ -45,14 +61,55 @@ const fetcher = async (url: string) => {
   return json.data as StaffUser[];
 };
 
-const inputClass =
-  "mt-1 w-full border border-ink-200 bg-white px-3 py-2 text-sm text-ink-950 outline-none focus:border-ink-950";
-const labelClass =
-  "block text-xs font-medium uppercase tracking-wide text-ink-500";
+const rolesFetcher = async (url: string) => {
+  const res = await fetch(url);
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.message || "Failed to fetch");
+  return json.data as { roles: RoleRow[]; permissions: CatalogRow[] };
+};
+
+/** Group catalog rows by module for the role editor checkboxes. */
+function groupCatalog(
+  rows: { key: string; description: string | null }[]
+): {
+  module: string;
+  items: { key: string; action: string; description: string | null }[];
+}[] {
+  const groups: {
+    module: string;
+    items: { key: string; action: string; description: string | null }[];
+  }[] = [];
+  for (const row of rows) {
+    const sep = row.key.indexOf(":");
+    const module = sep >= 0 ? row.key.slice(0, sep) : row.key;
+    const action = sep >= 0 ? row.key.slice(sep + 1) : row.key;
+    const existing = groups.find((g) => g.module === module);
+    const item = { key: row.key, action, description: row.description };
+    if (existing) existing.items.push(item);
+    else groups.push({ module, items: [item] });
+  }
+  return groups;
+}
+
+/** Group module:action keys by module, preserving first-appearance order. */
+function groupPermissionKeys(keys: string[]): {
+  module: string;
+  actions: string[];
+}[] {
+  const groups: { module: string; actions: string[] }[] = [];
+  for (const key of keys) {
+    const sep = key.indexOf(":");
+    const module = sep >= 0 ? key.slice(0, sep) : key;
+    const action = sep >= 0 ? key.slice(sep + 1) : key;
+    const existing = groups.find((g) => g.module === module);
+    if (existing) existing.actions.push(action);
+    else groups.push({ module, actions: [action] });
+  }
+  return groups;
+}
 
 export default function StaffPage({
   roles,
-  permissions,
   loadError,
   canManage,
 }: Props) {
@@ -61,6 +118,14 @@ export default function StaffPage({
     error: staffError,
     mutate,
   } = useSWR<StaffUser[]>("/api/staff", fetcher);
+  const { data: rolesData, mutate: mutateRoles } = useSWR(
+    "/api/roles",
+    rolesFetcher
+  );
+  // SSR roles render first paint; the live list takes over once fetched so
+  // newly created roles appear without a refresh.
+  const liveRoles = rolesData?.roles ?? roles;
+  const catalog = rolesData?.permissions ?? [];
 
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -68,6 +133,101 @@ export default function StaffPage({
   const [roleId, setRoleId] = useState(roles[0]?.id ?? "");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+
+  const [roleModal, setRoleModal] = useState<
+    { mode: "create" } | { mode: "edit"; role: RoleRow } | null
+  >(null);
+  const [roleName, setRoleName] = useState("");
+  const [roleDesc, setRoleDesc] = useState("");
+  const [roleKeys, setRoleKeys] = useState<string[]>([]);
+  const [roleSaving, setRoleSaving] = useState(false);
+  const [roleError, setRoleError] = useState<string | null>(null);
+
+  const openRoleCreate = () => {
+    setRoleName("");
+    setRoleDesc("");
+    setRoleKeys([]);
+    setRoleError(null);
+    setRoleModal({ mode: "create" });
+  };
+
+  const openRoleEdit = (role: RoleRow) => {
+    setRoleName(role.name);
+    setRoleDesc(role.description ?? "");
+    setRoleKeys(role.permissionKeys);
+    setRoleError(null);
+    setRoleModal({ mode: "edit", role });
+  };
+
+  const toggleRoleKey = (key: string) => {
+    setRoleKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  };
+
+  const saveRole = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!roleModal) return;
+    setRoleSaving(true);
+    setRoleError(null);
+    try {
+      const res = await fetch(
+        roleModal.mode === "create" ? "/api/roles" : `/api/roles/${roleModal.role.id}`,
+        {
+          method: roleModal.mode === "create" ? "POST" : "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: roleName,
+            description: roleDesc || null,
+            permissionKeys: roleKeys,
+          }),
+        }
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || "Save failed");
+      setRoleModal(null);
+      mutateRoles();
+    } catch (err) {
+      setRoleError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setRoleSaving(false);
+    }
+  };
+
+  const deleteRole = async (role: RoleRow) => {
+    if (
+      !confirm(
+        `Delete the "${role.name}" role? Staff users must be reassigned first.`
+      )
+    )
+      return;
+    const res = await fetch(`/api/roles/${role.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const json = await res.json();
+      alert(json.message || "Delete failed");
+      return;
+    }
+    mutateRoles();
+  };
+
+  const resetForm = () => {
+    setEmail("");
+    setName("");
+    setPassword("");
+    setRoleId(roles[0]?.id ?? "");
+    setFormError(null);
+  };
+
+  const openAdd = () => {
+    resetForm();
+    setAddOpen(true);
+  };
+
+  const closeAdd = () => {
+    setAddOpen(false);
+    setFormError(null);
+  };
 
   const createStaff = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,10 +241,9 @@ export default function StaffPage({
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Create failed");
-      setEmail("");
-      setName("");
-      setPassword("");
+      resetForm();
       mutate();
+      closeAdd();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Create failed");
     } finally {
@@ -116,228 +275,315 @@ export default function StaffPage({
       </Head>
       <PageHeader
         title="Staff & permissions"
-        description="Roles are presets of module:action keys. Per-user grants and revokes override role permissions."
+        subtitle="Roles are presets of module:action keys. Per-user grants and revokes override role permissions."
+        actions={
+          canManage ? (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={openRoleCreate}>
+                <Plus className="h-4 w-4" />
+                New role
+              </Button>
+              <Button onClick={openAdd}>
+                <Plus className="h-4 w-4" />
+                Add staff user
+              </Button>
+            </div>
+          ) : undefined
+        }
       />
 
       {loadError ? (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Could not load roles/permissions from the database. Apply the CRM
-          staff-auth migration and ensure DATABASE_URL is set.
+        <Alert tone="warning" title="Could not load roles/permissions">
+          Apply the CRM staff-auth migration and ensure DATABASE_URL is set.
           <pre className="mt-2 whitespace-pre-wrap font-mono text-xs opacity-80">
             {loadError}
           </pre>
-        </div>
+        </Alert>
       ) : null}
 
       <section className="mt-8">
-        <h2 className="text-sm font-semibold text-ink-800">Staff users</h2>
+        <SectionHeading>Staff users</SectionHeading>
         {staffError ? (
-          <p className="mt-3 text-sm text-red-600">{staffError.message}</p>
+          <Alert tone="danger">{staffError.message}</Alert>
         ) : !staff?.length ? (
-          <p className="mt-3 text-sm text-ink-500">No staff users yet.</p>
+          <EmptyState title="No staff users yet" />
         ) : (
-          <div className="mt-3 overflow-hidden rounded-lg border border-ink-200 bg-white">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-ink-200 bg-ink-50 text-xs uppercase tracking-wide text-ink-500">
-                <tr>
-                  <th className="px-4 py-2.5 font-medium">Name</th>
-                  <th className="px-4 py-2.5 font-medium">Email</th>
-                  <th className="px-4 py-2.5 font-medium">Role</th>
-                  <th className="px-4 py-2.5 font-medium">Status</th>
-                  {canManage ? (
-                    <th className="px-4 py-2.5 font-medium text-right">
-                      Actions
-                    </th>
-                  ) : null}
-                </tr>
-              </thead>
-              <tbody>
-                {staff.map((user) => (
-                  <tr key={user.id} className="border-b border-ink-100">
-                    <td className="px-4 py-3">{user.name || "—"}</td>
-                    <td className="px-4 py-3">{user.email}</td>
-                    <td className="px-4 py-3">
-                      {canManage ? (
-                        <select
-                          className="border border-ink-200 bg-white px-2 py-1 text-xs"
-                          value={user.roles[0]?.id ?? ""}
-                          onChange={(e) =>
-                            patchStaff(user.id, {
-                              roleId: e.target.value || null,
-                            })
-                          }
-                        >
-                          <option value="">No role</option>
-                          {roles.map((r) => (
-                            <option key={r.id} value={r.id}>
-                              {r.name}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        user.roles.map((r) => r.name).join(", ") || "—"
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={
-                          user.isActive ? "text-green-700" : "text-ink-400"
-                        }
-                      >
-                        {user.isActive ? "Active" : "Inactive"}
-                      </span>
-                    </td>
-                    {canManage ? (
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            patchStaff(user.id, { isActive: !user.isActive })
-                          }
-                          className="text-xs text-ink-600 hover:text-ink-950 underline-offset-2 hover:underline"
-                        >
-                          {user.isActive ? "Deactivate" : "Reactivate"}
-                        </button>
-                      </td>
-                    ) : null}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {canManage && (
-          <form
-            onSubmit={createStaff}
-            className="mt-6 max-w-md space-y-3 border border-ink-200 bg-white p-4"
+          <Table
+            head={
+              <>
+                <Th>Name</Th>
+                <Th>Email</Th>
+                <Th>Role</Th>
+                <Th>Status</Th>
+                {canManage ? <Th className="text-right">Actions</Th> : null}
+              </>
+            }
           >
-            <h3 className="text-sm font-semibold text-ink-950">Add staff user</h3>
-            {formError && (
-              <p className="text-sm text-red-600">{formError}</p>
-            )}
-            <div>
-              <label className={labelClass}>Email</label>
-              <input
-                type="email"
-                className={inputClass}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Name</label>
-              <input
-                className={inputClass}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Password</label>
-              <input
-                type="password"
-                className={inputClass}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                minLength={8}
-                required
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Role</label>
-              <select
-                className={inputClass}
-                value={roleId}
-                onChange={(e) => setRoleId(e.target.value)}
-              >
-                <option value="">No role</option>
-                {roles.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button
-              type="submit"
-              disabled={saving}
-              className="w-full bg-ink-950 px-4 py-2 text-sm text-white hover:bg-ink-800 disabled:opacity-50"
-            >
-              {saving ? "Creating…" : "Create staff user"}
-            </button>
-          </form>
+            {staff.map((user) => (
+              <tr key={user.id}>
+                <Td>{user.name || "—"}</Td>
+                <Td>{user.email}</Td>
+                <Td>
+                  {canManage ? (
+                    <Select
+                      className="w-auto py-1 text-xs"
+                      value={user.roles[0]?.id ?? ""}
+                      onChange={(e) =>
+                        patchStaff(user.id, { roleId: e.target.value || null })
+                      }
+                    >
+                      <option value="">No role</option>
+                      {liveRoles.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    user.roles.map((r) => r.name).join(", ") || "—"
+                  )}
+                </Td>
+                <Td>
+                  <StatusBadge tone={user.isActive ? "success" : "neutral"}>
+                    {user.isActive ? "Active" : "Inactive"}
+                  </StatusBadge>
+                </Td>
+                {canManage ? (
+                  <Td className="text-right">
+                    <Button
+                      variant="ghost"
+                      className="px-2 py-1 text-xs"
+                      onClick={() =>
+                        patchStaff(user.id, { isActive: !user.isActive })
+                      }
+                    >
+                      {user.isActive ? "Deactivate" : "Reactivate"}
+                    </Button>
+                  </Td>
+                ) : null}
+              </tr>
+            ))}
+          </Table>
         )}
       </section>
 
       <section className="mt-10">
-        <h2 className="text-sm font-semibold text-ink-800">Roles</h2>
-        {roles.length === 0 ? (
-          <div className="mt-3 rounded-lg border border-dashed border-ink-300 bg-white px-5 py-10 text-center">
-            <p className="text-sm font-medium text-ink-800">No roles yet</p>
-          </div>
+        <SectionHeading>Roles</SectionHeading>
+        {liveRoles.length === 0 ? (
+          <EmptyState title="No roles yet" />
         ) : (
-          <ul className="mt-3 space-y-3">
-            {roles.map((role) => (
-              <li
-                key={role.id}
-                className="rounded-lg border border-ink-200 bg-white px-5 py-4"
-              >
-                <div className="flex items-baseline justify-between gap-3">
-                  <h3 className="font-medium text-ink-950">{role.name}</h3>
-                  <span className="text-xs text-ink-500">
-                    {role.userCount} user{role.userCount === 1 ? "" : "s"}
-                  </span>
-                </div>
-                {role.description ? (
-                  <p className="mt-1 text-sm text-ink-600">{role.description}</p>
-                ) : null}
-                {role.permissionKeys.length > 0 ? (
-                  <ul className="mt-3 flex flex-wrap gap-1.5">
-                    {role.permissionKeys.map((key) => (
-                      <li
-                        key={key}
-                        className="rounded border border-ink-200 bg-ink-50 px-2 py-0.5 font-mono text-xs text-ink-700"
-                      >
-                        {key}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
+          <ul className="space-y-3">
+            {liveRoles.map((role) => (
+              <li key={role.id}>
+                <Card>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <h3 className="font-medium text-ink-900">{role.name}</h3>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <span className="mr-1 text-xs text-ink-500">
+                        {role.userCount} user{role.userCount === 1 ? "" : "s"}
+                      </span>
+                      {canManage && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            className="px-2 py-1 text-xs"
+                            onClick={() => openRoleEdit(role)}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            className="px-2 py-1 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+                            onClick={() => deleteRole(role)}
+                            aria-label={`Delete role ${role.name}`}
+                          >
+                            Delete
+                          </Button>
+                        </>
+                      )}
+                    </span>
+                  </div>
+                  {role.description ? (
+                    <p className="mt-1 text-sm text-ink-600">
+                      {role.description}
+                    </p>
+                  ) : null}
+                  {role.permissionKeys.length > 0 ? (
+                    <dl className="mt-3 space-y-2.5">
+                      {groupPermissionKeys(role.permissionKeys).map((group) => (
+                        <div
+                          key={group.module}
+                          className="flex flex-wrap items-center gap-x-3 gap-y-1.5"
+                        >
+                          <dt className="w-28 shrink-0 text-xs font-medium capitalize text-ink-500">
+                            {group.module}
+                          </dt>
+                          <dd className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+                            {group.actions.map((action) => (
+                              <Chip key={action} tone="neutral">
+                                <span className="font-mono">{action}</span>
+                              </Chip>
+                            ))}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : null}
+                </Card>
               </li>
             ))}
           </ul>
         )}
       </section>
 
-      <section className="mt-10">
-        <h2 className="text-sm font-semibold text-ink-800">
-          Permission catalog
-        </h2>
-        <div className="mt-3 overflow-hidden rounded-lg border border-ink-200 bg-white">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-ink-200 bg-ink-50 text-xs uppercase tracking-wide text-ink-500">
-              <tr>
-                <th className="px-4 py-2.5 font-medium">Key</th>
-                <th className="px-4 py-2.5 font-medium">Description</th>
-              </tr>
-            </thead>
-            <tbody>
-              {permissions.map((p) => (
-                <tr key={p.id} className="border-b border-ink-100 last:border-0">
-                  <td className="px-4 py-2.5 font-mono text-xs text-ink-800">
-                    {p.key}
-                  </td>
-                  <td className="px-4 py-2.5 text-ink-600">
-                    {p.description ?? "—"}
-                  </td>
-                </tr>
+      <Modal
+        open={roleModal !== null}
+        title={roleModal?.mode === "edit" ? "Edit role" : "New role"}
+        description="Pick exactly what this role can do, grouped by module."
+        onClose={() => setRoleModal(null)}
+        editor
+        wide
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRoleModal(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="role-form" disabled={roleSaving}>
+              {roleSaving
+                ? "Saving…"
+                : roleModal?.mode === "edit"
+                  ? "Update role"
+                  : "Create role"}
+            </Button>
+          </>
+        }
+      >
+        <form id="role-form" onSubmit={saveRole} className="space-y-4">
+          {roleError && (
+            <p role="alert" className="text-sm text-red-600">
+              {roleError}
+            </p>
+          )}
+          <Field label="Name" required>
+            <TextField
+              value={roleName}
+              onChange={(e) => setRoleName(e.target.value)}
+              required
+              placeholder="e.g. Box Office"
+            />
+          </Field>
+          <Field label="Description">
+            <TextField
+              value={roleDesc}
+              onChange={(e) => setRoleDesc(e.target.value)}
+              placeholder="What is this role for?"
+            />
+          </Field>
+          <div>
+            <p className="mb-2 block text-[0.8rem] font-medium text-ink-700">
+              Permissions · {roleKeys.length} selected
+            </p>
+            {catalog.length === 0 ? (
+              <p className="text-sm text-ink-500">
+                Loading permission catalog…
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {groupCatalog(catalog).map((group) => (
+                  <div key={group.module}>
+                    <p className="mb-1.5 text-xs font-medium capitalize text-ink-500">
+                      {group.module}
+                    </p>
+                    <div className="space-y-1">
+                      {group.items.map((item) => (
+                        <label
+                          key={item.key}
+                          className="flex cursor-pointer items-start gap-3 rounded-field border border-border px-3 py-2 transition-colors hover:border-ink-300"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={roleKeys.includes(item.key)}
+                            onChange={() => toggleRoleKey(item.key)}
+                            className="mt-1"
+                          />
+                          <span className="text-sm">
+                            <span className="font-mono text-[13px] text-ink-800">
+                              {item.action}
+                            </span>
+                            {item.description && (
+                              <span className="block text-xs text-ink-500">
+                                {item.description}
+                              </span>
+                            )}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={addOpen}
+        title="Add staff user"
+        description="Create a CRM login for a staff member."
+        onClose={closeAdd}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeAdd}>
+              Cancel
+            </Button>
+            <Button type="submit" form="staff-form" disabled={saving}>
+              {saving ? "Creating…" : "Create staff user"}
+            </Button>
+          </>
+        }
+      >
+        <form id="staff-form" onSubmit={createStaff} className="space-y-3">
+          {formError && (
+            <p role="alert" className="text-sm text-red-600">
+              {formError}
+            </p>
+          )}
+          <Field label="Email" required>
+            <TextField
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </Field>
+          <Field label="Name">
+            <TextField
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </Field>
+          <Field label="Password" required>
+            <TextField
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              minLength={8}
+              required
+            />
+          </Field>
+          <Field label="Role">
+            <Select value={roleId} onChange={(e) => setRoleId(e.target.value)}>
+              <option value="">No role</option>
+              {liveRoles.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+            </Select>
+          </Field>
+        </form>
+      </Modal>
     </DashboardLayout>
   );
 }
@@ -358,16 +604,13 @@ export const getServerSideProps: GetServerSideProps<Props> = async (ctx) => {
   const canManage = permissions.includes("staff:write");
 
   try {
-    const [roles, permissionRows] = await Promise.all([
-      prisma.crmRole.findMany({
-        orderBy: { name: "asc" },
-        include: {
-          permissions: { include: { permission: true } },
-          _count: { select: { users: true } },
-        },
-      }),
-      prisma.crmPermission.findMany({ orderBy: { key: "asc" } }),
-    ]);
+    const roles = await prisma.crmRole.findMany({
+      orderBy: { name: "asc" },
+      include: {
+        permissions: { include: { permission: true } },
+        _count: { select: { users: true } },
+      },
+    });
 
     return {
       props: {
@@ -378,11 +621,6 @@ export const getServerSideProps: GetServerSideProps<Props> = async (ctx) => {
           permissionKeys: r.permissions.map((rp) => rp.permission.key),
           userCount: r._count.users,
         })),
-        permissions: permissionRows.map((p) => ({
-          id: p.id,
-          key: p.key,
-          description: p.description,
-        })),
         loadError: null,
         canManage,
       },
@@ -392,7 +630,6 @@ export const getServerSideProps: GetServerSideProps<Props> = async (ctx) => {
     return {
       props: {
         roles: [],
-        permissions: [],
         loadError: message,
         canManage,
       },

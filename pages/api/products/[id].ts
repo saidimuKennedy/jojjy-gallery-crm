@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import prisma from "@/lib/prisma";
 import { requirePermission } from "@/lib/require-permission";
 import { validateVariants } from "@/lib/validate-variants";
+import { withSuffix } from "@/lib/product-sku";
 
 function serializeProduct(product: {
   id: number;
@@ -68,6 +69,9 @@ export default async function handler(
         return res.status(400).json({ success: false, message: checked.error });
       }
 
+      const base = checked.variants ?? [];
+      const hasAuto = base.some((v) => v.skuAuto);
+
       if (Array.isArray(variants)) {
         // Variants are replaced wholesale: refuse when existing variants back
         // paid order history (their IDs would be destroyed by the replace).
@@ -83,40 +87,68 @@ export default async function handler(
         }
       }
 
-      const product = await prisma.$transaction(async (tx) => {
-        await tx.product.update({
-          where: { id: productId },
-          data: {
-            name,
-            slug,
-            description: description || null,
-            imageUrl: imageUrl || null,
-            category: category || null,
-            isAvailable: isAvailable ?? true,
-          },
-        });
+      let product = null;
+      let lastConflict = false;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const rows = base.map((v) => ({
+          productId,
+          sku: v.skuAuto ? withSuffix(v.sku, attempt) : v.sku,
+          size: v.size,
+          color: v.color,
+          price: v.price,
+          stock: v.stock,
+        }));
+        try {
+          product = await prisma.$transaction(async (tx) => {
+            await tx.product.update({
+              where: { id: productId },
+              data: {
+                name,
+                slug,
+                description: description || null,
+                imageUrl: imageUrl || null,
+                category: category || null,
+                isAvailable: isAvailable ?? true,
+              },
+            });
 
-        if (Array.isArray(variants)) {
-          await tx.productVariant.deleteMany({ where: { productId } });
-          if ((checked.variants ?? []).length > 0) {
-            await tx.productVariant.createMany({
-              data: (checked.variants ?? []).map((v) => ({
-                productId,
-                sku: v.sku,
-                size: v.size,
-                color: v.color,
-                price: v.price,
-                stock: v.stock,
-              })),
+            if (Array.isArray(variants)) {
+              await tx.productVariant.deleteMany({ where: { productId } });
+              if (rows.length > 0) {
+                await tx.productVariant.createMany({ data: rows });
+              }
+            }
+
+            return tx.product.findUnique({
+              where: { id: productId },
+              include: { variants: { orderBy: { price: "asc" } } },
+            });
+          });
+          lastConflict = false;
+          break;
+        } catch (error) {
+          const code = (error as { code?: string }).code;
+          if (code === "P2002" && hasAuto && attempt < 3) {
+            lastConflict = true;
+            continue;
+          }
+          if (code === "P2002") {
+            return res.status(409).json({
+              success: false,
+              message:
+                "That generated SKU is already taken and a free suffix could not be found. Edit the SKU under Advanced details and try again.",
             });
           }
+          throw error;
         }
-
-        return tx.product.findUnique({
-          where: { id: productId },
-          include: { variants: { orderBy: { price: "asc" } } },
+      }
+      if (lastConflict && !product) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "That generated SKU is already taken and a free suffix could not be found. Edit the SKU under Advanced details and try again.",
         });
-      });
+      }
 
       if (!product) {
         return res

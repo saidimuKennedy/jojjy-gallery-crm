@@ -1,10 +1,33 @@
 import { useEffect, useState } from "react";
 import Head from "next/head";
 import useSWR from "swr";
-import { Plus, Edit3, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
+import { Plus, Edit3, ExternalLink, Trash2 } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
-import { PageHeader } from "@/components/ComingSoon";
+import {
+  Alert,
+  Button,
+  Card,
+  CurrencyField,
+  EmptyState,
+  Field,
+  LinkButton,
+  LoadingState,
+  Modal,
+  PageHeader,
+  SectionHeading,
+  Select,
+  StatusBadge,
+  Table,
+  Td,
+  TextArea,
+  TextField,
+  Th,
+} from "@/components/ui";
 import MediaUrlField from "@/components/Admin/MediaUrlField";
+import { useFormDraft } from "@/hooks/useFormDraft";
+import { useResumeAction } from "@/hooks/useResumeAction";
+import { slugify } from "@/lib/music";
 
 type TrackRow = {
   id: number;
@@ -26,8 +49,10 @@ type ReleaseRow = {
   releaseType: string;
   genre: string | null;
   publishStatus: string;
+  releaseDate: string | null;
   playCount: number;
   unlockCount: number;
+  createdAt: string;
   accessPolicy: {
     accessMode: string;
     price: number | null;
@@ -57,6 +82,7 @@ type ReleaseForm = {
   artistName: string;
   releaseType: string;
   genre: string;
+  releaseDate: string;
   publishStatus: string;
   accessMode: string;
   price: string;
@@ -73,6 +99,7 @@ const emptyForm = (): ReleaseForm => ({
   artistName: "Jojjy Gallery",
   releaseType: "SINGLE",
   genre: "",
+  releaseDate: "",
   publishStatus: "DRAFT",
   accessMode: "PAID",
   price: "",
@@ -86,10 +113,20 @@ const fetcher = async (url: string) => {
   return json.data;
 };
 
-const inputClass =
-  "mt-1 w-full border border-ink-200 bg-white px-3 py-2 text-sm text-ink-950 outline-none focus:border-ink-950";
-const labelClass =
-  "block text-xs font-medium uppercase tracking-wide text-ink-500";
+function publishTone(status: string): "neutral" | "success" | "warning" | "info" {
+  if (status === "PUBLISHED") return "success";
+  if (status === "SCHEDULED") return "info";
+  if (status === "ARCHIVED") return "warning";
+  return "neutral";
+}
+
+// Public gallery base URL for "View public page" links. The gallery is a
+// separate deployment; without this configured there is nowhere to link to,
+// so the action is hidden rather than guessed.
+const GALLERY_BASE_URL = (process.env.NEXT_PUBLIC_GALLERY_URL || "").replace(
+  /\/+$/,
+  ""
+);
 
 export default function MusicPage() {
   const {
@@ -104,6 +141,7 @@ export default function MusicPage() {
   );
 
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<"releases" | "plans" | "grants">("releases");
   const [editing, setEditing] = useState<ReleaseRow | null>(null);
   const [form, setForm] = useState<ReleaseForm>(emptyForm());
   const [saving, setSaving] = useState(false);
@@ -114,7 +152,6 @@ export default function MusicPage() {
   const [grantEmail, setGrantEmail] = useState("");
   const [grantReleaseId, setGrantReleaseId] = useState("");
   const [grantPlanId, setGrantPlanId] = useState("");
-  const [grantMsg, setGrantMsg] = useState<string | null>(null);
 
   const [planForm, setPlanForm] = useState({
     name: "Studio Pass",
@@ -122,6 +159,16 @@ export default function MusicPage() {
     durationDays: "30",
     description: "",
   });
+  const [editingPlanId, setEditingPlanId] = useState<number | null>(null);
+  const [planModalOpen, setPlanModalOpen] = useState(false);
+
+  const resetPlanForm = () =>
+    setPlanForm({
+      name: "Studio Pass",
+      price: "1000",
+      durationDays: "30",
+      description: "",
+    });
 
   useEffect(() => {
     if (!open) return;
@@ -136,6 +183,7 @@ export default function MusicPage() {
         artistName: editing.artistName,
         releaseType: editing.releaseType,
         genre: editing.genre || "",
+        releaseDate: editing.releaseDate ? editing.releaseDate.slice(0, 10) : "",
         publishStatus: editing.publishStatus,
         accessMode: editing.accessPolicy?.accessMode || "PAID",
         price:
@@ -148,6 +196,13 @@ export default function MusicPage() {
       setForm(emptyForm());
     }
   }, [editing, open]);
+
+  useResumeAction({
+    domain: "release",
+    rows: releases,
+    onNew: () => openCreate(),
+    onEdit: (row) => openEdit(row),
+  });
 
   const openCreate = () => {
     setEditing(null);
@@ -167,6 +222,20 @@ export default function MusicPage() {
     setFormError(null);
   };
 
+  // Local draft persistence (after populate so restores win over server data).
+  const releaseDraftKey = open
+    ? editing
+      ? `jenga:crm:draft:release:${editing.id}`
+      : "jenga:crm:draft:release:new"
+    : null;
+  const releaseDraft = useFormDraft({
+    draftKey: releaseDraftKey,
+    values: form,
+    emptyValues: emptyForm(),
+    onRestore: (v) => setForm(v),
+    enabled: open,
+  });
+
   const saveRelease = async () => {
     setSaving(true);
     setFormError(null);
@@ -181,6 +250,7 @@ export default function MusicPage() {
         artistName: form.artistName,
         releaseType: form.releaseType,
         genre: form.genre || null,
+        releaseDate: form.releaseDate || null,
         publishStatus: form.publishStatus,
         accessMode: form.accessMode,
         price: form.price || null,
@@ -197,11 +267,10 @@ export default function MusicPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Save failed");
       await mutate();
-      if (!editing) {
-        setEditing(json.data);
-      } else {
-        setEditing(json.data);
-      }
+      // Clear before switching keys: the modal stays open for tracks, and
+      // the new edit-key must not inherit the just-saved new-draft.
+      releaseDraft.clear();
+      setEditing(json.data);
     } catch (e) {
       setFormError((e as Error).message);
     } finally {
@@ -282,7 +351,18 @@ export default function MusicPage() {
   };
 
   const runGrant = async (type: "unlock" | "membership") => {
-    setGrantMsg(null);
+    if (!grantEmail.trim()) {
+      toast.error("Enter a fan email first");
+      return;
+    }
+    if (type === "unlock" && !grantReleaseId) {
+      toast.error("Choose a release to unlock");
+      return;
+    }
+    if (type === "membership" && !grantPlanId) {
+      toast.error("Choose a Studio Pass plan");
+      return;
+    }
     const res = await fetch("/api/music/grants", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -294,428 +374,694 @@ export default function MusicPage() {
       }),
     });
     const json = await res.json();
-    setGrantMsg(json.message || (res.ok ? "Granted" : "Failed"));
+    if (!res.ok) {
+      toast.error(json.message || "Grant failed");
+      return;
+    }
+    toast.success(json.message || "Granted");
     if (res.ok) mutate();
   };
 
   const createPlan = async () => {
+    const isEdit = editingPlanId !== null;
     const res = await fetch("/api/music/plans", {
-      method: "POST",
+      method: isEdit ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(planForm),
+      body: JSON.stringify(
+        isEdit ? { ...planForm, id: editingPlanId } : planForm
+      ),
     });
     const json = await res.json();
     if (!res.ok) {
-      alert(json.message || "Failed");
+      toast.error(json.message || "Could not save plan");
+      return;
+    }
+    setEditingPlanId(null);
+    resetPlanForm();
+    setPlanModalOpen(false);
+    mutatePlans();
+    toast.success(isEdit ? "Plan updated" : "Plan added");
+  };
+
+  const startPlanEdit = (plan: PlanRow) => {
+    setPlanForm({
+      name: plan.name,
+      price: String(plan.price),
+      durationDays: String(plan.durationDays),
+      description: plan.description ?? "",
+    });
+    setEditingPlanId(plan.id);
+    setPlanModalOpen(true);
+  };
+
+  const openPlanCreate = () => {
+    setEditingPlanId(null);
+    resetPlanForm();
+    setPlanModalOpen(true);
+  };
+
+  const cancelPlanEdit = () => {
+    setEditingPlanId(null);
+    resetPlanForm();
+    setPlanModalOpen(false);
+  };
+
+  const deletePlan = async (id: number) => {
+    if (!confirm("Delete this plan?")) return;
+    const res = await fetch(`/api/music/plans?id=${id}`, {
+      method: "DELETE",
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      toast.error(json.message || "Could not delete plan");
+      return;
+    }
+    if (editingPlanId === id) cancelPlanEdit();
+    mutatePlans();
+    toast.success("Plan deleted");
+  };
+
+  const togglePlanActive = async (plan: PlanRow) => {
+    const res = await fetch("/api/music/plans", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: plan.id, active: !plan.active }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      toast.error(json.message || "Could not update plan");
       return;
     }
     mutatePlans();
+    toast.success(plan.active ? "Plan deactivated" : "Plan reactivated");
   };
 
   return (
     <DashboardLayout>
       <Head>
-        <title>Music · CRM</title>
+        <title>Music — Jojjy Gallery CRM</title>
       </Head>
-      <div className="p-8 max-w-6xl">
-        <PageHeader
-          title="Music"
-          description="Releases, Studio Pass plans, and manual access grants."
+      <PageHeader
+        title="Music"
+        subtitle="Releases, Studio Pass plans, and manual access grants."
+        actions={
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4" />
+            New release
+          </Button>
+        }
+      />
+
+      <div
+        role="tablist"
+        aria-label="Music sections"
+        className="mb-6 flex gap-6 border-b border-border"
+      >
+        {(
+          [
+            { key: "releases", label: "Releases" },
+            { key: "plans", label: "Studio Pass plans" },
+            { key: "grants", label: "Access grants" },
+          ] as const
+        ).map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.key}
+            onClick={() => setTab(t.key)}
+            className={`-mb-px border-b-2 pb-2 text-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 ${
+              tab === t.key
+                ? "border-accent-600 font-medium text-ink-900"
+                : "border-transparent text-ink-500 hover:text-ink-900"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "releases" && (
+        <>
+      {error ? (
+        <Alert tone="danger">{(error as Error).message}</Alert>
+      ) : isLoading ? (
+        <LoadingState label="Loading releases…" />
+      ) : !releases?.length ? (
+        <EmptyState
+          title="No releases yet"
+          description="Create your first release to start publishing music."
+          action={<Button onClick={openCreate}>New release</Button>}
+        />
+      ) : (
+        <Table
+          head={
+            <>
+              <Th>Release</Th>
+              <Th>Type</Th>
+              <Th>Status</Th>
+              <Th>Price</Th>
+              <Th>Tracks</Th>
+              <Th>Plays</Th>
+              <Th>Created</Th>
+              <Th className="text-right">Actions</Th>
+            </>
+          }
         >
-            <button
-              type="button"
-              onClick={openCreate}
-              className="inline-flex items-center gap-2 bg-ink-950 text-white px-4 py-2 text-sm"
-            >
-              <Plus className="h-4 w-4" />
-              New release
-            </button>
-        </PageHeader>
-
-        {error && (
-          <p className="mt-4 text-sm text-red-700">{(error as Error).message}</p>
-        )}
-        {isLoading && <p className="mt-6 text-sm text-ink-500">Loading…</p>}
-
-        <div className="mt-6 overflow-x-auto border border-ink-200 bg-white">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-ink-200 text-xs uppercase tracking-wide text-ink-500">
-              <tr>
-                <th className="px-4 py-3">Title</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Access</th>
-                <th className="px-4 py-3">Tracks</th>
-                <th className="px-4 py-3">Plays</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {(releases || []).map((r) => (
-                <tr key={r.id} className="border-b border-ink-100">
-                  <td className="px-4 py-3 font-medium">{r.title}</td>
-                  <td className="px-4 py-3">{r.publishStatus}</td>
-                  <td className="px-4 py-3">
-                    {r.accessPolicy?.accessMode}
-                    {r.accessPolicy?.accessMode === "PAID" &&
-                      r.accessPolicy.price != null &&
-                      ` · ${r.accessPolicy.price} ${r.accessPolicy.currency}`}
-                  </td>
-                  <td className="px-4 py-3">{r.tracks.length}</td>
-                  <td className="px-4 py-3">{r.playCount}</td>
-                  <td className="px-4 py-3 text-right space-x-2">
-                    <button
-                      type="button"
-                      onClick={() => openEdit(r)}
-                      className="inline-flex p-1.5 text-ink-600 hover:text-ink-950"
+          {releases.map((r) => (
+            <tr key={r.id}>
+              <Td>
+                <div className="flex items-center gap-3">
+                  {r.coverImage ? (
+                    <img
+                      src={r.coverImage}
+                      alt=""
+                      className="h-10 w-10 shrink-0 rounded-field border border-border object-cover"
+                    />
+                  ) : (
+                    <span
+                      aria-hidden="true"
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-field border border-border bg-ink-50 text-[10px] text-ink-400"
                     >
-                      <Edit3 className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeRelease(r.id)}
-                      className="inline-flex p-1.5 text-ink-600 hover:text-red-700"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {releases?.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-ink-500">
-                    No releases yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <section className="mt-10 grid gap-8 md:grid-cols-2">
-          <div className="border border-ink-200 bg-white p-5">
-            <h2 className="text-sm font-semibold uppercase tracking-wide">
-              Studio Pass plans
-            </h2>
-            <ul className="mt-3 space-y-2 text-sm">
-              {(plans || []).map((p) => (
-                <li key={p.id} className="flex justify-between border-b border-ink-100 py-2">
-                  <span>
-                    {p.name} · {p.durationDays}d
+                      No art
+                    </span>
+                  )}
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-ink-900">
+                      {r.title}
+                    </span>
+                    <span className="block truncate text-xs text-ink-500">
+                      {r.artistName}
+                    </span>
                   </span>
-                  <span>
+                </div>
+              </Td>
+              <Td className="whitespace-nowrap text-ink-600">
+                {r.releaseType.replace(/_/g, " ")}
+              </Td>
+              <Td>
+                <StatusBadge tone={publishTone(r.publishStatus)}>
+                  {r.publishStatus}
+                </StatusBadge>
+              </Td>
+              <Td className="whitespace-nowrap text-ink-600">
+                {r.accessPolicy?.accessMode}
+                {r.accessPolicy?.accessMode === "PAID" &&
+                  r.accessPolicy.price != null &&
+                  ` · ${r.accessPolicy.price} ${r.accessPolicy.currency}`}
+              </Td>
+              <Td className="text-ink-600">{r.tracks.length}</Td>
+              <Td className="text-ink-600">{r.playCount}</Td>
+              <Td className="whitespace-nowrap text-ink-600">
+                {new Date(r.createdAt).toLocaleDateString("en-GB", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </Td>
+              <Td>
+                <div className="flex justify-end gap-1">
+                  <Button
+                    variant="ghost"
+                    className="px-2 py-1"
+                    onClick={() => openEdit(r)}
+                    aria-label="Edit release"
+                  >
+                    <Edit3 className="h-4 w-4" />
+                  </Button>
+                  {GALLERY_BASE_URL && (
+                    <LinkButton
+                      href={`${GALLERY_BASE_URL}/music/${r.slug}`}
+                      variant="ghost"
+                      className="px-2 py-1"
+                      aria-label={`View ${r.title} public page`}
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                    </LinkButton>
+                  )}
+                  <Button
+                    variant="ghost"
+                    className="px-2 py-1 text-red-600 hover:bg-red-50 hover:text-red-700"
+                    onClick={() => removeRelease(r.id)}
+                    aria-label="Delete release"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </Td>
+            </tr>
+          ))}
+        </Table>
+      )}
+        </>
+      )}
+
+      {tab === "plans" && (
+      <section aria-label="Studio Pass plans" className="max-w-3xl">
+        <Card>
+          <SectionHeading
+            action={
+              <Button
+                variant="ghost"
+                className="px-2 py-1 text-xs"
+                onClick={openPlanCreate}
+              >
+                + Add plan
+              </Button>
+            }
+          >
+            Studio Pass plans{editingPlanId !== null ? " · editing" : ""}
+          </SectionHeading>
+          <div className="max-h-64 overflow-y-auto">
+          <ul className="divide-y divide-ink-100 text-sm">
+            {(plans || []).map((p) => (
+              <li key={p.id} className="flex items-center justify-between gap-3 py-2">
+                <span className="min-w-0 text-ink-800">
+                  {p.name} · {p.durationDays}d
+                  {!p.active && (
+                    <StatusBadge tone="neutral">
+                      <span className="ml-2">Inactive</span>
+                    </StatusBadge>
+                  )}
+                </span>
+                <span className="flex shrink-0 items-center gap-1">
+                  <span className="mr-1 text-ink-600">
                     {p.price} {p.currency}
                   </span>
-                </li>
-              ))}
-            </ul>
-            <div className="mt-4 space-y-2">
-              <input
-                className={inputClass}
-                placeholder="Plan name"
-                value={planForm.name}
-                onChange={(e) =>
-                  setPlanForm((f) => ({ ...f, name: e.target.value }))
-                }
-              />
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  className={inputClass}
-                  placeholder="Price KES"
-                  value={planForm.price}
-                  onChange={(e) =>
-                    setPlanForm((f) => ({ ...f, price: e.target.value }))
-                  }
-                />
-                <input
-                  className={inputClass}
-                  placeholder="Days"
-                  value={planForm.durationDays}
-                  onChange={(e) =>
-                    setPlanForm((f) => ({ ...f, durationDays: e.target.value }))
-                  }
-                />
-              </div>
-              <button
-                type="button"
-                onClick={createPlan}
-                className="bg-ink-950 px-3 py-2 text-sm text-white"
-              >
-                Add plan
-              </button>
-            </div>
+                  <Button
+                    variant="ghost"
+                    className="px-2 py-1 text-xs"
+                    onClick={() => startPlanEdit(p)}
+                    aria-label={`Edit plan ${p.name}`}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="px-2 py-1 text-xs"
+                    onClick={() => togglePlanActive(p)}
+                  >
+                    {p.active ? "Deactivate" : "Reactivate"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="px-2 py-1 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+                    onClick={() => deletePlan(p.id)}
+                    aria-label={`Delete plan ${p.name}`}
+                  >
+                    Delete
+                  </Button>
+                </span>
+              </li>
+            ))}
+          </ul>
           </div>
+        </Card>
+      </section>
+      )}
 
-          <div className="border border-ink-200 bg-white p-5">
-            <h2 className="text-sm font-semibold uppercase tracking-wide">
-              Manual grants
-            </h2>
-            <p className="mt-1 text-xs text-ink-500">
-              MVP commerce until Order fulfillment is live.
-            </p>
-            <div className="mt-3 space-y-2">
-              <input
-                className={inputClass}
-                placeholder="Fan email"
+      {tab === "grants" && (
+      <section aria-label="Access grants" className="max-w-3xl">
+        <Card>
+          <SectionHeading>Manual grants</SectionHeading>
+          <p className="-mt-2 mb-3 text-sm text-ink-600">
+            Manual access for support cases — every grant is recorded against
+            your staff account. Prefer checkout; use this when a fan
+            can&apos;t pay online.
+          </p>
+          <div className="space-y-3">
+            <Field label="Fan email" required>
+              <TextField
+                type="email"
+                placeholder="fan@example.com"
                 value={grantEmail}
                 onChange={(e) => setGrantEmail(e.target.value)}
               />
-              <select
-                className={inputClass}
-                value={grantReleaseId}
-                onChange={(e) => setGrantReleaseId(e.target.value)}
-              >
-                <option value="">Release for unlock…</option>
-                {(releases || []).map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.title}
-                  </option>
-                ))}
-              </select>
-              <select
-                className={inputClass}
-                value={grantPlanId}
-                onChange={(e) => setGrantPlanId(e.target.value)}
-              >
-                <option value="">Membership plan…</option>
-                {(plans || []).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => runGrant("unlock")}
-                  className="bg-ink-950 px-3 py-2 text-sm text-white"
-                >
-                  Grant unlock
-                </button>
-                <button
-                  type="button"
-                  onClick={() => runGrant("membership")}
-                  className="border border-ink-950 px-3 py-2 text-sm"
-                >
-                  Grant pass
-                </button>
-              </div>
-              {grantMsg && (
-                <p className="text-sm text-ink-700">{grantMsg}</p>
+            </Field>
+            <div className="space-y-2 rounded-field border border-border p-3">
+              <p className="text-sm font-medium text-ink-800">
+                Release unlock
+              </p>
+              {(releases || []).length > 0 ? (
+                <>
+                  <Select
+                    aria-label="Release for unlock"
+                    value={grantReleaseId}
+                    onChange={(e) => setGrantReleaseId(e.target.value)}
+                  >
+                    <option value="">Release for unlock…</option>
+                    {(releases || []).map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.title}
+                      </option>
+                    ))}
+                  </Select>
+                  <Button type="button" onClick={() => runGrant("unlock")}>
+                    Grant unlock
+                  </Button>
+                </>
+              ) : (
+                <p className="text-xs text-ink-500">
+                  No releases yet — create a release above to grant unlocks.
+                </p>
+              )}
+            </div>
+            <div className="space-y-2 rounded-field border border-border p-3">
+              <p className="text-sm font-medium text-ink-800">Studio pass</p>
+              {(plans || []).length > 0 ? (
+                <>
+                  <Select
+                    aria-label="Membership plan"
+                    value={grantPlanId}
+                    onChange={(e) => setGrantPlanId(e.target.value)}
+                  >
+                    <option value="">Membership plan…</option>
+                    {(plans || []).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => runGrant("membership")}
+                  >
+                    Grant pass
+                  </Button>
+                </>
+              ) : (
+                <p className="text-xs text-ink-500">
+                  No plans yet — add a Studio Pass plan first.
+                </p>
               )}
             </div>
           </div>
-        </section>
-      </div>
+        </Card>
+      </section>
+      )}
 
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4">
-          <div className="mt-8 w-full max-w-xl border border-ink-200 bg-white shadow-lg">
-            <div className="flex items-center justify-between border-b border-ink-200 px-5 py-4">
-              <h2 className="font-semibold">
-                {editing ? "Edit release" : "New release"}
-              </h2>
-              <button type="button" onClick={close}>
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="space-y-3 px-5 py-4">
-              {formError && (
-                <p className="text-sm text-red-700">{formError}</p>
-              )}
-              <label className={labelClass}>
-                Title
-                <input
-                  className={inputClass}
-                  value={form.title}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, title: e.target.value }))
-                  }
-                />
-              </label>
-              <label className={labelClass}>
-                Slug
-                <input
-                  className={inputClass}
-                  value={form.slug}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, slug: e.target.value }))
-                  }
-                />
-              </label>
-              <label className={labelClass}>
-                Description
-                <textarea
-                  className={inputClass}
-                  rows={3}
-                  value={form.description}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, description: e.target.value }))
-                  }
-                />
-              </label>
-              <label className={labelClass}>
-                Artist notes (public liner notes)
-                <textarea
-                  className={inputClass}
-                  rows={3}
-                  value={form.artistNotes}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, artistNotes: e.target.value }))
-                  }
-                />
-              </label>
-              <label className={labelClass}>
-                Studio notes (members/owners only)
-                <textarea
-                  className={inputClass}
-                  rows={3}
-                  value={form.studioNotes}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, studioNotes: e.target.value }))
-                  }
-                />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className={labelClass}>
-                  Type
-                  <select
-                    className={inputClass}
-                    value={form.releaseType}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, releaseType: e.target.value }))
-                    }
-                  >
-                    {[
-                      "SINGLE",
-                      "EP",
-                      "ALBUM",
-                      "LIVE_SESSION",
-                      "ACOUSTIC_SESSION",
-                    ].map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className={labelClass}>
-                  Status
-                  <select
-                    className={inputClass}
-                    value={form.publishStatus}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        publishStatus: e.target.value,
-                      }))
-                    }
-                  >
-                    {["DRAFT", "SCHEDULED", "PUBLISHED", "ARCHIVED"].map(
-                      (t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      )
-                    )}
-                  </select>
-                </label>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <label className={labelClass}>
-                  Access
-                  <select
-                    className={inputClass}
-                    value={form.accessMode}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, accessMode: e.target.value }))
-                    }
-                  >
-                    {["FREE", "PAID", "MEMBERS_ONLY"].map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className={labelClass}>
-                  Price (KES)
-                  <input
-                    className={inputClass}
-                    value={form.price}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, price: e.target.value }))
-                    }
-                  />
-                </label>
-              </div>
-              <label className={labelClass}>
-                <span className="sr-only">Cover image</span>
-                <MediaUrlField
-                  label="Cover image"
-                  value={form.coverImage}
-                  onChange={(url) =>
-                    setForm((f) => ({ ...f, coverImage: url }))
-                  }
-                />
-              </label>
-
-              {editing && (
-                <div className="border-t border-ink-100 pt-3">
-                  <p className={labelClass}>Tracks</p>
-                  <ul className="mt-2 space-y-1 text-sm">
-                    {editing.tracks.map((t) => (
-                      <li
-                        key={t.id}
-                        className="flex items-center justify-between"
-                      >
-                        <span>
-                          {t.trackNumber}. {t.title}
-                        </span>
-                        <button
-                          type="button"
-                          className="text-red-700"
-                          onClick={() => deleteTrack(t.id)}
-                        >
-                          Remove
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="mt-2 flex gap-2">
-                    <input
-                      className={inputClass + " !mt-0"}
-                      placeholder="Track title"
-                      value={trackTitle}
-                      onChange={(e) => setTrackTitle(e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      disabled={uploading}
-                      onClick={addTrack}
-                      className="shrink-0 bg-ink-950 px-3 py-2 text-sm text-white disabled:opacity-50"
-                    >
-                      {uploading ? "Uploading…" : "Upload audio"}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="flex justify-end gap-2 border-t border-ink-200 px-5 py-4">
-              <button type="button" onClick={close} className="px-4 py-2 text-sm">
-                Close
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={saveRelease}
-                className="bg-ink-950 px-4 py-2 text-sm text-white disabled:opacity-50"
-              >
-                {saving ? "Saving…" : "Save"}
-              </button>
-            </div>
+      <Modal
+        open={planModalOpen}
+        title={editingPlanId !== null ? "Edit plan" : "New plan"}
+        description="Studio Pass plans unlock member-only music."
+        onClose={cancelPlanEdit}
+        footer={
+          <>
+            <Button variant="secondary" onClick={cancelPlanEdit}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={createPlan}>
+              {editingPlanId !== null ? "Update plan" : "Add plan"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <Field label="Plan name" required>
+            <TextField
+              placeholder="Studio Pass"
+              value={planForm.name}
+              onChange={(e) =>
+                setPlanForm((f) => ({ ...f, name: e.target.value }))
+              }
+            />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Price (KES)">
+              <CurrencyField
+                value={planForm.price}
+                onChange={(e) =>
+                  setPlanForm((f) => ({ ...f, price: e.target.value }))
+                }
+              />
+            </Field>
+            <Field label="Duration (days)">
+              <TextField
+                type="number"
+                min="1"
+                step="1"
+                value={planForm.durationDays}
+                onChange={(e) =>
+                  setPlanForm((f) => ({ ...f, durationDays: e.target.value }))
+                }
+              />
+            </Field>
           </div>
         </div>
-      )}
+      </Modal>
+
+      <Modal
+        open={open}
+        title={editing ? "Edit release" : "New release"}
+        description={
+          editing
+            ? "Update release details, access, and tracks"
+            : "Create a release and its access policy"
+        }
+        onClose={close}
+        editor
+        wide
+        footer={
+          <>
+            {releaseDraft.savedAt && (
+              <span className="mr-auto text-xs text-ink-400">
+                Draft saved locally
+              </span>
+            )}
+            <Button variant="secondary" onClick={close}>
+              Close
+            </Button>
+            <Button type="button" disabled={saving} onClick={saveRelease}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          {releaseDraft.recovered && (
+            <p className="text-xs text-ink-500">
+              Draft recovered — your unfinished work was restored.{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  releaseDraft.discard();
+                  if (editing) openEdit({ ...editing });
+                  else setForm(emptyForm());
+                }}
+                className="text-accent-700 underline-offset-2 hover:underline"
+              >
+                Discard draft
+              </button>
+            </p>
+          )}
+          {formError && (
+            <Alert tone="danger" title="Could not save release">
+              {formError}
+            </Alert>
+          )}
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Title" required>
+              <TextField
+                value={form.title}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    title: e.target.value,
+                    // Slug tracks the title until the release exists; stored
+                    // slugs are never rewritten on edit.
+                    slug: editing ? f.slug : slugify(e.target.value),
+                  }))
+                }
+                required
+              />
+            </Field>
+            <MediaUrlField
+              label="Cover image"
+              wide
+              value={form.coverImage}
+              onChange={(url) => setForm((f) => ({ ...f, coverImage: url }))}
+            />
+          </div>
+          <Field label="Artist name" required hint="Shown publicly under the release title.">
+            <TextField
+              value={form.artistName}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, artistName: e.target.value }))
+              }
+              required
+              placeholder="Njenga Ngugi"
+            />
+          </Field>
+          <Field label="Description">
+            <TextArea
+              rows={3}
+              value={form.description}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, description: e.target.value }))
+              }
+            />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Type">
+              <Select
+                value={form.releaseType}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, releaseType: e.target.value }))
+                }
+              >
+                {[
+                  "SINGLE",
+                  "EP",
+                  "ALBUM",
+                  "LIVE_SESSION",
+                  "ACOUSTIC_SESSION",
+                ].map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Status">
+              <Select
+                value={form.publishStatus}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    publishStatus: e.target.value,
+                  }))
+                }
+              >
+                {["DRAFT", "SCHEDULED", "PUBLISHED", "ARCHIVED"].map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Release date">
+              <TextField
+                type="date"
+                value={form.releaseDate}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, releaseDate: e.target.value }))
+                }
+              />
+            </Field>
+            <Field label="Genre">
+              <TextField
+                value={form.genre}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, genre: e.target.value }))
+                }
+                placeholder="Ambient"
+              />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Access">
+              <Select
+                value={form.accessMode}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, accessMode: e.target.value }))
+                }
+              >
+                {["FREE", "PAID", "MEMBERS_ONLY"].map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {form.accessMode === "PAID" && (
+              <Field label="Price (KES)">
+                <CurrencyField
+                  value={form.price}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, price: e.target.value }))
+                  }
+                />
+              </Field>
+            )}
+          </div>
+          <Field
+            label="Preview play limit"
+            hint="Free preview plays per listener before an unlock is required."
+          >
+            <TextField
+              type="number"
+              min="0"
+              step="1"
+              value={form.paidPlayLimit}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, paidPlayLimit: e.target.value }))
+              }
+            />
+          </Field>
+          {editing && (
+            <div className="border-t border-border pt-3">
+              <SectionHeading>Tracks</SectionHeading>
+              <ul className="space-y-1 text-sm">
+                {editing.tracks.map((t) => (
+                  <li
+                    key={t.id}
+                    className="flex items-center justify-between gap-3"
+                  >
+                    <span className="text-ink-800">
+                      {t.trackNumber}. {t.title}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="shrink-0 px-2 py-1 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+                      onClick={() => deleteTrack(t.id)}
+                    >
+                      Remove
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-2 flex gap-2">
+                <TextField
+                  aria-label="Track title"
+                  placeholder="Track title"
+                  value={trackTitle}
+                  onChange={(e) => setTrackTitle(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  disabled={uploading}
+                  onClick={addTrack}
+                  className="shrink-0"
+                >
+                  {uploading ? "Uploading…" : "Upload audio"}
+                </Button>
+              </div>
+            </div>
+          )}
+          <Field label="Artist notes (public liner notes)">
+            <TextArea
+              rows={3}
+              value={form.artistNotes}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, artistNotes: e.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Studio notes (members/owners only)">
+            <TextArea
+              rows={3}
+              value={form.studioNotes}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, studioNotes: e.target.value }))
+              }
+            />
+          </Field>
+        </div>
+      </Modal>
     </DashboardLayout>
   );
 }

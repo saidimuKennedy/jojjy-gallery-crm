@@ -3,7 +3,19 @@ import Head from "next/head";
 import useSWR from "swr";
 import { Download, Users } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
-import { PageHeader } from "@/components/ComingSoon";
+import {
+  EmptyState,
+  ErrorState,
+  Field,
+  LinkButton,
+  LoadingState,
+  PageHeader,
+  StatusBadge,
+  Table,
+  Td,
+  TextField,
+  Th,
+} from "@/components/ui";
 
 type SubscriberRow = {
   id: string;
@@ -69,88 +81,70 @@ export default function AudiencePage() {
       </Head>
       <PageHeader
         title="Audience"
-        description="Email subscribers who opted in for studio updates."
-      >
-        <a
-          href={exportHref}
-          className="inline-flex items-center gap-2 border border-ink-300 bg-white px-4 py-2 text-sm text-ink-900 hover:border-ink-950"
-        >
-          <Download className="h-4 w-4" />
-          Export CSV
-        </a>
-      </PageHeader>
+        subtitle="Email subscribers who opted in for studio updates."
+        actions={
+          <LinkButton href={exportHref} variant="secondary">
+            <Download className="h-4 w-4" />
+            Export CSV
+          </LinkButton>
+        }
+      />
 
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex items-center gap-2 text-ink-900">
           <Users className="h-5 w-5 text-ink-500" />
-          <p className="text-lg font-medium tracking-tight">{countLabel}</p>
+          <p className="text-lg font-semibold tracking-tight">{countLabel}</p>
         </div>
         <div className="w-full sm:max-w-xs">
-          <label
-            htmlFor="audience-search"
-            className="block text-xs font-medium uppercase tracking-wide text-ink-500"
-          >
-            Search
-          </label>
-          <input
-            id="audience-search"
-            type="search"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search email…"
-            className="mt-1 w-full border border-ink-200 bg-white px-3 py-2 text-sm text-ink-950 outline-none focus:border-ink-950"
-          />
+          <Field label="Search" htmlFor="audience-search">
+            <TextField
+              id="audience-search"
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search email…"
+            />
+          </Field>
         </div>
       </div>
 
       {isLoading ? (
-        <p className="text-sm text-ink-500">Loading subscribers…</p>
+        <LoadingState label="Loading subscribers…" />
       ) : error ? (
-        <p className="text-sm text-red-600">{error.message}</p>
+        <ErrorState message={error.message} />
       ) : !data?.subscribers.length ? (
-        <p className="text-sm text-ink-500">
-          {debouncedQ
-            ? "No subscribers match that search."
-            : "No email subscribers yet."}
-        </p>
+        <EmptyState
+          title={debouncedQ ? "No matches" : "No email subscribers yet"}
+          description={
+            debouncedQ
+              ? "No subscribers match that search."
+              : "Subscribers appear here once people opt in."
+          }
+        />
       ) : (
-        <div className="overflow-x-auto border border-ink-200 bg-white">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-ink-200 bg-ink-50 text-xs uppercase tracking-wide text-ink-500">
-              <tr>
-                <th className="px-4 py-3 font-medium">Email</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Subscribed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.subscribers.map((row) => (
-                <tr
-                  key={row.id}
-                  className="border-b border-ink-100 last:border-0"
+        <Table
+          head={
+            <>
+              <Th>Email</Th>
+              <Th>Status</Th>
+              <Th>Subscribed</Th>
+            </>
+          }
+        >
+          {data.subscribers.map((row) => (
+            <tr key={row.id}>
+              <Td className="text-ink-900">{row.email || "—"}</Td>
+              <Td>
+                <StatusBadge
+                  tone={row.status === "ACTIVE" ? "success" : "neutral"}
                 >
-                  <td className="px-4 py-3 text-ink-900">
-                    {row.email || "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={
-                        row.status === "ACTIVE"
-                          ? "text-ink-700"
-                          : "text-ink-400"
-                      }
-                    >
-                      {row.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-ink-500">
-                    {formatDate(row.subscribedAt)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  {row.status}
+                </StatusBadge>
+              </Td>
+              <Td className="text-ink-500">{formatDate(row.subscribedAt)}</Td>
+            </tr>
+          ))}
+        </Table>
       )}
     </DashboardLayout>
   );

@@ -14,8 +14,12 @@ import {
   FileText,
   Music,
   Mail,
+  ScanLine,
+  RotateCcw,
+  BarChart3,
 } from "lucide-react";
 import { ReactNode, useMemo } from "react";
+import Assistant from "@/components/openui/Assistant";
 
 const NAV = [
   {
@@ -34,6 +38,24 @@ const NAV = [
   },
   { href: "/dashboard/events", label: "Events", icon: Calendar, permission: "events:read" },
   { href: "/dashboard/tickets", label: "Tickets", icon: Ticket, permission: "tickets:read" },
+  {
+    href: "/dashboard/checkin",
+    label: "Check-in",
+    icon: ScanLine,
+    permission: "tickets:check-in",
+  },
+  {
+    href: "/dashboard/reports",
+    label: "Reports",
+    icon: BarChart3,
+    permission: "reporting:read",
+  },
+  {
+    href: "/dashboard/refunds",
+    label: "Refunds",
+    icon: RotateCcw,
+    permission: "orders:read",
+  },
   { href: "/dashboard/orders", label: "Orders", icon: ShoppingBag, permission: "orders:read" },
   { href: "/dashboard/merch", label: "Merch", icon: ShoppingBag, permission: "merch:read" },
   { href: "/dashboard/music", label: "Music", icon: Music, permission: "music:read" },
@@ -67,15 +89,15 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   );
 
   return (
-    <div className="min-h-screen flex bg-ink-50 text-ink-950">
-      <aside className="w-56 shrink-0 border-r border-ink-200 bg-white flex flex-col">
-        <div className="px-5 py-6 border-b border-ink-200">
+    <div className="flex h-screen overflow-hidden bg-ink-50 text-ink-950">
+      <aside className="flex h-full w-56 shrink-0 flex-col border-r border-ink-200 bg-white">
+        <div className="shrink-0 border-b border-ink-200 px-5 py-6">
           <p className="text-[11px] uppercase tracking-[0.18em] text-ink-500">
             Jojjy Gallery
           </p>
           <h1 className="mt-1 text-lg font-semibold tracking-tight">CRM</h1>
         </div>
-        <nav className="flex-1 py-3 px-2 space-y-0.5">
+        <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 py-3">
           {visibleNav.map(({ href, label, icon: Icon, ...rest }) => {
             const exact = "exact" in rest && rest.exact;
             const active = exact
@@ -86,10 +108,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               <Link
                 key={href}
                 href={href}
-                className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors ${
+                className={`flex items-center gap-2.5 rounded-full px-3.5 py-2 text-sm font-medium transition-colors ${
                   active
-                    ? "bg-ink-950 text-white"
-                    : "text-ink-700 hover:bg-ink-100"
+                    ? "bg-blue-50 text-blue-700"
+                    : "text-ink-600 hover:bg-ink-100 hover:text-ink-900"
                 }`}
               >
                 <Icon className="h-4 w-4 shrink-0 opacity-80" />
@@ -98,7 +120,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             );
           })}
         </nav>
-        <div className="border-t border-ink-200 px-4 py-4">
+        <div className="shrink-0 border-t border-ink-200 px-4 py-4">
           <p className="truncate text-xs text-ink-500">
             {session?.user?.email}
           </p>
@@ -112,9 +134,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </button>
         </div>
       </aside>
-      <main className="flex-1 min-w-0 overflow-auto">
+      <main className="h-full min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-7xl px-8 py-10">{children}</div>
       </main>
+      <Assistant />
     </div>
   );
 }

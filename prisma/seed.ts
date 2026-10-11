@@ -20,10 +20,18 @@ const DEFAULT_PERMISSIONS = [
   { key: "series:write", description: "Create/update series" },
   { key: "events:read", description: "View events" },
   { key: "events:write", description: "Create/update events" },
-  { key: "tickets:read", description: "View tickets" },
-  { key: "tickets:write", description: "Manage ticket types and check-in" },
+  { key: "events:publish", description: "Publish, schedule, cancel, or complete events" },
+  { key: "tickets:read", description: "View tickets and ticket types" },
+  { key: "tickets:write", description: "Manage ticket types and archive tiers" },
+  { key: "tickets:issue-complimentary", description: "Issue complimentary tickets" },
+  { key: "tickets:check-in", description: "Scan or look up tickets at the door" },
+  { key: "tickets:check-in-correct", description: "Reverse or correct a check-in" },
   { key: "orders:read", description: "View orders and fulfilment" },
   { key: "orders:write", description: "Mark orders fulfilled" },
+  { key: "orders:refund-request", description: "Request a refund on a paid order" },
+  { key: "orders:refund-approve", description: "Approve and submit refunds (cannot approve own request)" },
+  { key: "reporting:read", description: "View event/order reports" },
+  { key: "reporting:export", description: "Export attendee and report CSV" },
   { key: "merch:read", description: "View merch" },
   { key: "merch:write", description: "Manage products and inventory" },
   { key: "announcements:read", description: "View announcements" },
@@ -34,6 +42,55 @@ const DEFAULT_PERMISSIONS = [
   { key: "music:write", description: "Create/update music and grant access" },
   { key: "music:publish", description: "Publish or schedule music releases" },
   { key: "music:archive", description: "Archive music releases" },
+];
+
+/**
+ * Default non-admin roles. Staff runs daily ops but cannot grant access,
+ * approve refunds, or export PII — those stay with Admin.
+ */
+const DEFAULT_ROLES: { name: string; description: string; keys: string[] }[] = [
+  {
+    name: "Staff",
+    description: "Daily operations. Cannot manage staff, approve refunds, or export reports.",
+    keys: DEFAULT_PERMISSIONS.map((p) => p.key).filter(
+      (k) => k !== "staff:write" && k !== "orders:refund-approve" && k !== "reporting:export"
+    ),
+  },
+  {
+    name: "Box Office",
+    description: "Ticket desk and door: events, complimentary tickets, check-in.",
+    keys: [
+      "events:read",
+      "tickets:read",
+      "tickets:issue-complimentary",
+      "tickets:check-in",
+      "tickets:check-in-correct",
+      "orders:read",
+    ],
+  },
+  {
+    name: "Shop",
+    description: "Merch desk: products, order fulfilment, refund requests.",
+    keys: [
+      "merch:read",
+      "merch:write",
+      "orders:read",
+      "orders:write",
+      "orders:refund-request",
+    ],
+  },
+  {
+    name: "Comms",
+    description: "Announcements and read-only catalogue access.",
+    keys: [
+      "announcements:read",
+      "announcements:write",
+      "artworks:read",
+      "series:read",
+      "events:read",
+      "music:read",
+    ],
+  },
 ];
 
 async function main() {
@@ -98,6 +155,34 @@ async function main() {
         },
         create: { roleId: adminRole.id, permissionId: p.id },
         update: {},
+      });
+    }
+
+    // Default operational roles. Created once by name; re-seeds only refresh
+    // the description so staff customizations to role permissions survive.
+    const permByKey = new Map(allPerms.map((p) => [p.key, p.id]));
+    for (const preset of DEFAULT_ROLES) {
+      const existing = await prisma.crmRole.findUnique({
+        where: { name: preset.name },
+      });
+      if (existing) {
+        await prisma.crmRole.update({
+          where: { id: existing.id },
+          data: { description: preset.description },
+        });
+        continue;
+      }
+      await prisma.crmRole.create({
+        data: {
+          name: preset.name,
+          description: preset.description,
+          permissions: {
+            create: preset.keys
+              .map((key) => permByKey.get(key))
+              .filter((id): id is string => typeof id === "string")
+              .map((permissionId) => ({ permissionId })),
+          },
+        },
       });
     }
 

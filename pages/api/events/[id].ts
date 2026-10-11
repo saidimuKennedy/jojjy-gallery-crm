@@ -3,6 +3,7 @@ import type { Event, EventStatus, Prisma, TicketType } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { requirePermission } from "@/lib/require-permission";
 import { promoteEventStatus } from "@/lib/events";
+import { capacityEditError } from "@/lib/ticketing/inventory";
 
 function slugify(input: string): string {
   return input
@@ -94,6 +95,8 @@ export default async function handler(
           directions,
           openingHours,
           artistTalkAt,
+          ticketMode,
+          ticketTypes,
         } = req.body;
 
         if (!title || !startsAt) {
@@ -119,12 +122,181 @@ export default async function handler(
           openingHours: openingHours ?? null,
           artistTalkAt: artistTalkAt ? new Date(artistTalkAt) : null,
         };
+        if (ticketMode === "RSVP_ONLY" || ticketMode === "TICKETED") {
+          data.ticketMode = ticketMode;
+        }
         if (status === "CANCELLED") {
           data.status = "CANCELLED";
           data.publishAt = null;
         } else if (status === "PUBLISHED") {
           data.status = "PUBLISHED";
           data.publishAt = null;
+        }
+
+        // Reconcile inline ticket types in one transaction (create / update /
+        // archive). Deletion is only allowed when a tier has no sales or
+        // active reservations; otherwise it is archived to preserve history.
+        const incoming = Array.isArray(ticketTypes)
+          ? (ticketTypes as {
+              id?: number;
+              name?: string;
+              description?: string | null;
+              price?: number | string;
+              quantity?: number | string;
+              salesStart?: string | null;
+              salesEnd?: string | null;
+            }[])
+          : undefined;
+
+        if (incoming !== undefined) {
+          const normalized: {
+            id?: number;
+            name: string;
+            description: string | null;
+            price: number;
+            quantity: number;
+            salesStart: Date | null;
+            salesEnd: Date | null;
+          }[] = [];
+
+          for (const tt of incoming) {
+            const price =
+              typeof tt.price === "number" ? tt.price : parseFloat(String(tt.price));
+            const quantity =
+              typeof tt.quantity === "number"
+                ? tt.quantity
+                : Number(tt.quantity);
+            if (!tt.name || !tt.name.trim()) {
+              return res.status(400).json({
+                success: false,
+                message: "Each ticket type needs a name.",
+              });
+            }
+            if (!Number.isFinite(price) || price < 0) {
+              return res.status(400).json({
+                success: false,
+                message: `Ticket type "${tt.name}" needs a price of 0 or more.`,
+              });
+            }
+            if (!Number.isInteger(quantity) || quantity < 0) {
+              return res.status(400).json({
+                success: false,
+                message: `Ticket type "${tt.name}" needs a whole-number quantity of 0 or more.`,
+              });
+            }
+            const salesStart = tt.salesStart ? new Date(tt.salesStart) : null;
+            const salesEnd = tt.salesEnd ? new Date(tt.salesEnd) : null;
+            if (
+              (salesStart && isNaN(salesStart.getTime())) ||
+              (salesEnd && isNaN(salesEnd.getTime()))
+            ) {
+              return res.status(400).json({
+                success: false,
+                message: `Ticket type "${tt.name}" has an invalid sales date.`,
+              });
+            }
+            if (salesStart && salesEnd && salesEnd <= salesStart) {
+              return res.status(400).json({
+                success: false,
+                message: `Ticket type "${tt.name}" needs salesEnd after salesStart.`,
+              });
+            }
+            normalized.push({
+              id: tt.id,
+              name: tt.name.trim(),
+              description:
+                typeof tt.description === "string" && tt.description.trim()
+                  ? tt.description.trim().slice(0, 1000)
+                  : null,
+              price,
+              quantity,
+              salesStart,
+              salesEnd,
+            });
+          }
+
+          const existingTypes = await prisma.ticketType.findMany({
+            where: { eventId },
+          });
+          const keepIds = new Set(
+            normalized
+              .map((t) => t.id)
+              .filter((id): id is number => typeof id === "number")
+          );
+
+          for (const t of normalized) {
+            if (t.id !== undefined) {
+              const existing = existingTypes.find((e) => e.id === t.id);
+              if (!existing) {
+                return res.status(404).json({
+                  success: false,
+                  message: `Ticket type ${t.id} does not belong to this event.`,
+                });
+              }
+              const guard = capacityEditError(existing, t.quantity);
+              if (guard) {
+                return res.status(409).json({
+                  success: false,
+                  message: `"${t.name}": ${guard}`,
+                });
+              }
+            }
+          }
+
+          await prisma.$transaction(async (tx) => {
+            await tx.event.update({ where: { id: eventId }, data });
+
+            for (const t of normalized) {
+              if (t.id !== undefined) {
+                await tx.ticketType.update({
+                  where: { id: t.id },
+                  data: {
+                    name: t.name,
+                    description: t.description,
+                    price: t.price,
+                    quantity: t.quantity,
+                    salesStart: t.salesStart,
+                    salesEnd: t.salesEnd,
+                  },
+                });
+              } else {
+                await tx.ticketType.create({
+                  data: {
+                    eventId,
+                    name: t.name,
+                    description: t.description,
+                    price: t.price,
+                    quantity: t.quantity,
+                    salesStart: t.salesStart,
+                    salesEnd: t.salesEnd,
+                  },
+                });
+              }
+            }
+
+            // Tiers removed by staff: delete when unsold/unreserved, archive
+            // otherwise so sales history is never destroyed.
+            const removed = existingTypes.filter((e) => !keepIds.has(e.id));
+            for (const e of removed) {
+              if (e.quantitySold > 0 || e.quantityReserved > 0) {
+                await tx.ticketType.update({
+                  where: { id: e.id },
+                  data: { archivedAt: new Date() },
+                });
+              } else {
+                await tx.ticketType.delete({ where: { id: e.id } });
+              }
+            }
+          });
+
+          const reloaded = await prisma.event.findUnique({
+            where: { id: eventId },
+            include: { ticketTypes: { orderBy: { price: "asc" } } },
+          });
+          return res.status(200).json({
+            success: true,
+            data: reloaded ? serializeEvent(reloaded) : null,
+          });
         }
 
         const updated = await prisma.event.update({

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import Head from "next/head";
 import { useRouter } from "next/router";
 import { signIn, useSession } from "next-auth/react";
+import { Alert, Button, Card, Field, TextField } from "@/components/ui";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -29,8 +30,8 @@ export default function LoginPage() {
 
   if (status === "loading" || status === "authenticated") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-ink-50">
-        <div className="h-10 w-10 animate-spin rounded-full border-2 border-ink-200 border-t-ink-900" />
+      <div className="flex min-h-screen items-center justify-center bg-ink-50">
+        <div className="h-10 w-10 animate-spin rounded-full border-2 border-ink-200 border-t-accent-600" />
       </div>
     );
   }
@@ -60,13 +61,13 @@ export default function LoginPage() {
       <Head>
         <title>Sign in — Jojjy Gallery CRM</title>
       </Head>
-      <div className="min-h-screen flex items-center justify-center bg-ink-50 px-4">
+      <div className="flex min-h-screen items-center justify-center bg-ink-50 px-4">
         <div className="w-full max-w-sm">
           <div className="mb-8">
             <p className="text-[11px] uppercase tracking-[0.18em] text-ink-500">
               Jojjy Gallery
             </p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-ink-900">
               Staff sign in
             </h1>
             <p className="mt-2 text-sm text-ink-600">
@@ -75,48 +76,32 @@ export default function LoginPage() {
             </p>
           </div>
 
-          <form
-            onSubmit={handleSubmit}
-            className="rounded-lg border border-ink-200 bg-white p-6 shadow-sm space-y-4"
-          >
-            {error ? (
-              <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
-              </p>
-            ) : null}
-
-            <label className="block">
-              <span className="text-xs font-medium text-ink-700">Email</span>
-              <input
-                type="email"
-                required
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="mt-1.5 w-full rounded-md border border-ink-300 px-3 py-2 text-sm outline-none focus:border-ink-900"
-              />
-            </label>
-
-            <label className="block">
-              <span className="text-xs font-medium text-ink-700">Password</span>
-              <input
-                type="password"
-                required
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="mt-1.5 w-full rounded-md border border-ink-300 px-3 py-2 text-sm outline-none focus:border-ink-900"
-              />
-            </label>
-
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full rounded-md bg-ink-950 px-3 py-2.5 text-sm font-medium text-white hover:bg-ink-800 disabled:opacity-60"
-            >
-              {isSubmitting ? "Signing in…" : "Sign in"}
-            </button>
-          </form>
+          <Card>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {error ? <Alert tone="danger">{error}</Alert> : null}
+              <Field label="Email" required>
+                <TextField
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </Field>
+              <Field label="Password" required>
+                <TextField
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </Field>
+              <Button type="submit" disabled={isSubmitting} className="w-full">
+                {isSubmitting ? "Signing in…" : "Sign in"}
+              </Button>
+            </form>
+          </Card>
         </div>
       </div>
     </>

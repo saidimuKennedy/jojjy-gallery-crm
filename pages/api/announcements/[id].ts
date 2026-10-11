@@ -54,7 +54,7 @@ export default async function handler(
         if (!(await requirePermission(req, res, "announcements:write")))
           return;
 
-        const { title, body, eventId, publishedAt, publish } = req.body ?? {};
+        const { title, body, imageUrl, eventId, publishedAt, publish } = req.body ?? {};
 
         if (!title || !body) {
           return res.status(400).json({
@@ -83,6 +83,7 @@ export default async function handler(
           data: {
             title,
             body,
+            imageUrl: typeof imageUrl === "string" && imageUrl.trim() ? imageUrl.trim() : null,
             eventId:
               eventId !== undefined && eventId !== null && eventId !== ""
                 ? Number(eventId)

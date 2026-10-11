@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import prisma from "@/lib/prisma";
 import { validateVariants } from "@/lib/validate-variants";
+import { withSuffix } from "@/lib/product-sku";
 import { requirePermission } from "@/lib/require-permission";
 
 function serializeProduct(product: {
@@ -79,27 +80,51 @@ export default async function handler(
         return res.status(400).json({ success: false, message: checked.error });
       }
 
-      const product = await prisma.product.create({
-        data: {
-          name,
-          slug,
-          description: description || null,
-          imageUrl: imageUrl || null,
-          category: category || null,
-          isAvailable: isAvailable ?? true,
-          variants: {
-            create: (checked.variants ?? []).map((v) => ({
-              sku: v.sku,
-              size: v.size,
-              color: v.color,
-              price: v.price,
-              stock: v.stock,
-            })),
-          },
-        },
-        include: { variants: true },
-      });
+      const base = checked.variants ?? [];
+      const hasAuto = base.some((v) => v.skuAuto);
+      let product = null;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const rows = base.map((v) => ({
+          sku: v.skuAuto ? withSuffix(v.sku, attempt) : v.sku,
+          size: v.size,
+          color: v.color,
+          price: v.price,
+          stock: v.stock,
+        }));
+        try {
+          product = await prisma.product.create({
+            data: {
+              name,
+              slug,
+              description: description || null,
+              imageUrl: imageUrl || null,
+              category: category || null,
+              isAvailable: isAvailable ?? true,
+              variants: { create: rows },
+            },
+            include: { variants: true },
+          });
+          break;
+        } catch (error) {
+          const code = (error as { code?: string }).code;
+          if (code === "P2002" && hasAuto && attempt < 3) continue;
+          if (code === "P2002") {
+            return res.status(409).json({
+              success: false,
+              message:
+                "That generated SKU is already taken and a free suffix could not be found. Edit the SKU under Advanced details and try again.",
+            });
+          }
+          throw error;
+        }
+      }
 
+      if (!product) {
+        return res.status(500).json({
+          success: false,
+          message: "Could not save product. Try again.",
+        });
+      }
       return res.status(201).json({
         success: true,
         data: serializeProduct(product),

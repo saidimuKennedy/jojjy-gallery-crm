@@ -1,9 +1,24 @@
 import React, { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Edit3, Trash2, X, AlertCircle } from "lucide-react";
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  Field,
+  LoadingState,
+  Modal,
+  PageHeader,
+  Table,
+  Td,
+  TextArea,
+  TextField,
+  Th,
+} from "@/components/ui";
+import { Plus, Edit3, Trash2 } from "lucide-react";
 import useSWR from "swr";
 import { APIError } from "@/types/api";
 import { Series } from "@prisma/client";
+import { useResumeAction } from "@/hooks/useResumeAction";
+import { useFormDraft } from "@/hooks/useFormDraft";
 
 interface SeriesFormData {
   id?: number;
@@ -64,6 +79,21 @@ const SeriesManagement = () => {
     }
   }, [editingSeries, isModalOpen]);
 
+  // Local draft persistence. Declared after the populate effect so a
+  // restored draft applies on top of server values, never underneath.
+  const seriesDraftKey = isModalOpen
+    ? editingSeries
+      ? `jenga:crm:draft:series:${editingSeries.id}`
+      : "jenga:crm:draft:series:new"
+    : null;
+  const seriesDraft = useFormDraft({
+    draftKey: seriesDraftKey,
+    values: formData,
+    emptyValues: emptyForm(),
+    onRestore: (v) => setFormData(v),
+    enabled: isModalOpen,
+  });
+
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newName = e.target.value;
     const newSlug = newName
@@ -82,6 +112,13 @@ const SeriesManagement = () => {
       [name]: type === "checkbox" ? checked : value,
     }));
   };
+
+  useResumeAction({
+    domain: "series",
+    rows: seriesList,
+    onNew: () => handleAddSeries(),
+    onEdit: (row) => handleEditSeries(row),
+  });
 
   const handleAddSeries = () => {
     setEditingSeries(null);
@@ -137,6 +174,7 @@ const SeriesManagement = () => {
           : "Series added successfully!"
       );
       mutate(); // Revalidate SWR cache to update the list
+      seriesDraft.clear();
       setTimeout(() => closeModal(), 1500);
     } catch (err: any) {
       console.error("Failed to save series:", err);
@@ -183,264 +221,215 @@ const SeriesManagement = () => {
     }
   };
 
-  if (isLoading)
-    return <div className="text-center py-8">Loading series...</div>;
-  if (error)
-    return (
-      <div className="text-center py-8 text-red-500">
-        Error: {error.message}
-      </div>
-    );
+  if (isLoading) return <LoadingState label="Loading series…" />;
+  if (error) return <ErrorState message={error.message} />;
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-black">Manage Series</h2>
-        <button
-          onClick={handleAddSeries}
-          className="bg-black text-white px-6 py-3 rounded-md hover:bg-gray-800 transition-colors flex items-center"
-        >
-          <Plus className="w-5 h-5 mr-2" /> Add New Series
-        </button>
-      </div>
+    <div>
+      <PageHeader
+        title="Manage Series"
+        subtitle="Collections that group artworks for the public exhibition pages."
+        actions={
+          <Button onClick={handleAddSeries}>
+            <Plus className="h-4 w-4" /> Add New Series
+          </Button>
+        }
+      />
 
       {seriesList && seriesList.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">
-          No series found. Add your first series!
-        </div>
+        <EmptyState
+          title="No series found"
+          description="Add your first series to group artworks."
+          action={<Button onClick={handleAddSeries}>Add New Series</Button>}
+        />
       ) : (
-        <div className="overflow-x-auto bg-white rounded-lg shadow">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Name
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Description
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Slug
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Created At
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {seriesList?.map((series) => (
-                <tr key={series.id}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {series.name}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-500 max-w-xs">
-                    <div className="truncate" title={series.description || ""}>
-                      {series.description || "-"}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {series.slug}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {new Date(series.createdAt).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button
-                      onClick={() => handleEditSeries(series)}
-                      className="text-gray-900 hover:text-black mr-4"
-                    >
-                      <Edit3 className="w-5 h-5 inline-block" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteSeries(series.id)}
-                      className="text-red-600 hover:text-red-900"
-                    >
-                      <Trash2 className="w-5 h-5 inline-block" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table
+          head={
+            <>
+              <Th>Name</Th>
+              <Th>Description</Th>
+              <Th>Slug</Th>
+              <Th>Created</Th>
+              <Th className="text-right">Actions</Th>
+            </>
+          }
+        >
+          {seriesList?.map((series) => (
+            <tr key={series.id}>
+              <Td className="font-medium text-ink-900">{series.name}</Td>
+              <Td className="max-w-xs text-ink-500">
+                <div className="truncate" title={series.description || ""}>
+                  {series.description || "-"}
+                </div>
+              </Td>
+              <Td className="text-ink-500">{series.slug}</Td>
+              <Td className="text-ink-500">
+                {new Date(series.createdAt).toLocaleDateString()}
+              </Td>
+              <Td>
+                <div className="flex justify-end gap-1">
+                  <Button
+                    variant="ghost"
+                    className="px-2 py-1"
+                    aria-label="Edit series"
+                    onClick={() => handleEditSeries(series)}
+                  >
+                    <Edit3 className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="px-2 py-1 text-red-600 hover:bg-red-50 hover:text-red-700"
+                    aria-label="Delete series"
+                    onClick={() => handleDeleteSeries(series.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </Td>
+            </tr>
+          ))}
+        </Table>
       )}
 
       {/* Add/Edit Series Modal */}
-      <AnimatePresence>
-        {isModalOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
-          >
-            <motion.div
-              initial={{ y: -50, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 50, opacity: 0 }}
-              className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md relative overflow-y-auto max-h-[90vh]"
-            >
-              <button
+      <Modal
+          open={isModalOpen}
+          title={editingSeries ? "Edit series" : "New series"}
+          description={
+            editingSeries
+              ? "Update series details"
+              : "Group artworks into a collection"
+          }
+          onClose={closeModal}
+          editor
+          wide
+          footer={
+            <>
+              {submitError && (
+                <span className="mr-auto text-sm text-red-600">{submitError}</span>
+              )}
+              {successMessage && (
+                <span className="mr-auto text-sm text-green-700">
+                  {successMessage}
+                </span>
+              )}
+              {seriesDraft.savedAt && (
+                <span className="mr-auto text-xs text-ink-400">
+                  Draft saved locally
+                </span>
+              )}
+              <Button
+                variant="secondary"
                 onClick={closeModal}
-                className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
+                disabled={isSubmitting}
               >
-                <X className="w-6 h-6" />
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                form="series-form"
+                disabled={isSubmitting}
+              >
+                {isSubmitting
+                  ? editingSeries
+                    ? "Updating…"
+                    : "Adding…"
+                  : editingSeries
+                    ? "Update Series"
+                    : "Add Series"}
+              </Button>
+            </>
+          }
+        >
+          {seriesDraft.recovered && (
+            <p className="text-xs text-ink-500">
+              Draft recovered —{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  seriesDraft.discard();
+                  setFormData(
+                    editingSeries
+                      ? {
+                          id: editingSeries.id,
+                          name: editingSeries.name,
+                          slug: editingSeries.slug,
+                          description: editingSeries.description || "",
+                          introduction: editingSeries.introduction || "",
+                          artistStatement: editingSeries.artistStatement || "",
+                          filmUrl: editingSeries.filmUrl || "",
+                        }
+                      : emptyForm()
+                  );
+                }}
+                className="text-accent-700 underline-offset-2 hover:underline"
+              >
+                discard
               </button>
-              <h3 className="text-2xl font-bold mb-6 text-gray-800">
-                {editingSeries ? "Edit Series" : "Add New Series"}
-              </h3>
+            </p>
+          )}
 
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label
-                    htmlFor="name"
-                    className="block text-sm font-medium text-black mb-2"
-                  >
-                    Name
-                  </label>
-                  <input
-                    type="text"
-                    id="name"
-                    name="name"
-                    value={formData.name}
-                    onChange={handleNameChange}
-                    required
-                    className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="slug"
-                    className="block text-sm font-medium text-black mb-2"
-                  >
-                    Slug (Auto-generated)
-                  </label>
-                  <input
-                    type="text"
-                    id="slug"
-                    name="slug"
-                    value={formData.slug}
-                    onChange={handleChange}
-                    readOnly
-                    className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black bg-gray-100 cursor-not-allowed"
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="description"
-                    className="block text-sm font-medium text-black mb-2"
-                  >
-                    Description
-                  </label>
-                  <textarea
-                    id="description"
-                    name="description"
-                    value={formData.description}
-                    onChange={handleChange}
-                    rows={3}
-                    className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
-                  ></textarea>
-                </div>
-                <div>
-                  <label
-                    htmlFor="introduction"
-                    className="block text-sm font-medium text-black mb-2"
-                  >
-                    Introduction (exhibition page)
-                  </label>
-                  <textarea
-                    id="introduction"
-                    name="introduction"
-                    value={formData.introduction}
-                    onChange={handleChange}
-                    rows={3}
-                    className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
-                  ></textarea>
-                </div>
-                <div>
-                  <label
-                    htmlFor="artistStatement"
-                    className="block text-sm font-medium text-black mb-2"
-                  >
-                    Artist statement
-                  </label>
-                  <textarea
-                    id="artistStatement"
-                    name="artistStatement"
-                    value={formData.artistStatement}
-                    onChange={handleChange}
-                    rows={4}
-                    className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
-                  ></textarea>
-                </div>
-                <div>
-                  <label
-                    htmlFor="filmUrl"
-                    className="block text-sm font-medium text-black mb-2"
-                  >
-                    Film URL (YouTube / Vimeo)
-                  </label>
-                  <input
-                    type="url"
-                    id="filmUrl"
-                    name="filmUrl"
-                    value={formData.filmUrl}
-                    onChange={handleChange}
-                    placeholder="https://..."
-                    className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
-                  />
-                </div>
-
-                {submitError && (
-                  <div
-                    className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4"
-                    role="alert"
-                  >
-                    <strong className="font-bold">Error!</strong>
-                    <span className="block sm:inline"> {submitError}</span>
-                  </div>
-                )}
-                {successMessage && (
-                  <div
-                    className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4"
-                    role="alert"
-                  >
-                    <strong className="font-bold">Success!</strong>
-                    <span className="block sm:inline"> {successMessage}</span>
-                  </div>
-                )}
-
-                <div className="flex justify-end space-x-3 mt-6">
-                  <button
-                    type="button"
-                    onClick={closeModal}
-                    className="px-4 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
-                    disabled={isSubmitting}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="bg-black text-white px-6 py-3 hover:bg-gray-800 transition-colors"
-                    disabled={isSubmitting}
-                  >
-                    {isSubmitting
-                      ? editingSeries
-                        ? "Updating..."
-                        : "Adding..."
-                      : editingSeries
-                      ? "Update Series"
-                      : "Add Series"}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          <form id="series-form" onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Name" required>
+                <TextField
+                  id="name"
+                  name="name"
+                  value={formData.name}
+                  onChange={handleNameChange}
+                  required
+                />
+              </Field>
+              <Field label="Slug" hint="Auto-generated from the name.">
+                <TextField
+                  id="slug"
+                  name="slug"
+                  value={formData.slug}
+                  onChange={handleChange}
+                  readOnly
+                  className="bg-ink-100"
+                />
+              </Field>
+            </div>
+            <Field label="Description">
+              <TextArea
+                id="description"
+                name="description"
+                value={formData.description}
+                onChange={handleChange}
+                rows={3}
+              />
+            </Field>
+            <Field label="Introduction (exhibition page)">
+              <TextArea
+                id="introduction"
+                name="introduction"
+                value={formData.introduction}
+                onChange={handleChange}
+                rows={3}
+              />
+            </Field>
+            <Field label="Artist statement">
+              <TextArea
+                id="artistStatement"
+                name="artistStatement"
+                value={formData.artistStatement}
+                onChange={handleChange}
+                rows={4}
+              />
+            </Field>
+            <Field label="Film URL (YouTube / Vimeo)">
+              <TextField
+                type="url"
+                id="filmUrl"
+                name="filmUrl"
+                value={formData.filmUrl}
+                onChange={handleChange}
+                placeholder="https://..."
+              />
+            </Field>
+          </form>
+        </Modal>
     </div>
   );
 };

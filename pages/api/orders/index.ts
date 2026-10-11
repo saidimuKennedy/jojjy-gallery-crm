@@ -10,6 +10,11 @@ function serializeOrder(order: {
   paystackChargeAmount: { toNumber(): number } | null;
   paystackChargeCurrency: string | null;
   customerName: string | null;
+  guestName: string | null;
+  guestEmail: string | null;
+  guestPhone: string | null;
+  source: string;
+  paymentStatus: string;
   phoneNumber: string | null;
   deliveryNotes: string | null;
   fulfilledAt: Date | null;
@@ -17,13 +22,19 @@ function serializeOrder(order: {
   deliveryAddress: string | null;
   packaging: string | null;
   createdAt: Date;
-  user: { email: string; username: string };
+  user: { email: string; username: string } | null;
+  paystackRef: string | null;
   items: {
     itemType: string;
     quantity: number;
     unitPrice: { toNumber(): number };
+    productVariantId: number | null;
+    ticketTypeId: number | null;
+    artworkId: number | null;
+    releaseId: number | null;
+    membershipPlanId: number | null;
     artwork: { title: string } | null;
-    ticketType: { name: string; event: { title: string } } | null;
+    ticketType: { name: string; event: { id: number; title: string } } | null;
     productVariant: { sku: string; product: { name: string } } | null;
     release: { title: string } | null;
     membershipPlan: { name: string } | null;
@@ -33,22 +44,25 @@ function serializeOrder(order: {
   return {
     id: order.id,
     status: order.status,
+    paymentStatus: order.paymentStatus,
+    source: order.source,
     amount: order.amount.toNumber(),
     currency: order.currency,
     chargeAmount: order.paystackChargeAmount
       ? order.paystackChargeAmount.toNumber()
       : null,
     chargeCurrency: order.paystackChargeCurrency,
-    customerName: order.customerName,
-    phoneNumber: order.phoneNumber,
+    customerName: order.customerName ?? order.guestName,
+    phoneNumber: order.phoneNumber ?? order.guestPhone,
     deliveryNotes: order.deliveryNotes,
     fulfilledAt: order.fulfilledAt ? order.fulfilledAt.toISOString() : null,
     deliveryMethod: order.deliveryMethod,
     deliveryAddress: order.deliveryAddress,
     packaging: order.packaging,
     createdAt: order.createdAt.toISOString(),
-    customerEmail: order.user.email,
-    customerUsername: order.user.username,
+    customerEmail: order.user?.email ?? order.guestEmail ?? null,
+    customerUsername: order.user?.username ?? null,
+    paystackRef: order.paystackRef,
     items: order.items.map((item) => {
       let label = item.itemType;
       if (item.artwork) label = item.artwork.title;
@@ -62,6 +76,12 @@ function serializeOrder(order: {
         itemType: item.itemType,
         quantity: item.quantity,
         unitPrice: item.unitPrice.toNumber(),
+        productVariantId: item.productVariantId,
+        ticketTypeId: item.ticketTypeId,
+        artworkId: item.artworkId,
+        releaseId: item.releaseId,
+        membershipPlanId: item.membershipPlanId,
+        eventId: item.ticketType ? item.ticketType.event.id : null,
         label,
       };
     }),
@@ -78,7 +98,7 @@ const include = {
     include: {
       artwork: { select: { title: true } },
       ticketType: {
-        select: { name: true, event: { select: { title: true } } },
+        select: { name: true, event: { select: { id: true, title: true } } },
       },
       productVariant: {
         select: { sku: true, product: { select: { name: true } } },
@@ -99,7 +119,7 @@ export default async function handler(
   if (req.method === "GET") {
     if (!(await requirePermission(req, res, "orders:read"))) return;
     try {
-      const { status, q } = req.query;
+      const { status, q, page = "1", limit = "25" } = req.query;
       const where: Record<string, unknown> = {};
       if (typeof status === "string" && status) {
         where.status = status;
@@ -107,19 +127,35 @@ export default async function handler(
       if (typeof q === "string" && q.trim()) {
         where.OR = [
           { customerName: { contains: q.trim(), mode: "insensitive" } },
+          { guestName: { contains: q.trim(), mode: "insensitive" } },
+          { guestEmail: { contains: q.trim(), mode: "insensitive" } },
           { user: { email: { contains: q.trim(), mode: "insensitive" } } },
           { paystackRef: { contains: q.trim(), mode: "insensitive" } },
         ];
       }
-      const orders = await prisma.order.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        take: 100,
-        include,
-      });
+      let pageNum = parseInt(Array.isArray(page) ? page[0] : page, 10);
+      if (isNaN(pageNum) || pageNum < 1) pageNum = 1;
+      let limitNum = parseInt(
+        Array.isArray(limit) ? limit[0] : limit,
+        10
+      );
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 200) limitNum = 25;
+      const [orders, total] = await Promise.all([
+        prisma.order.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          skip: (pageNum - 1) * limitNum,
+          take: limitNum,
+          include,
+        }),
+        prisma.order.count({ where }),
+      ]);
       return res.status(200).json({
         success: true,
         data: orders.map(serializeOrder),
+        total,
+        page: pageNum,
+        limit: limitNum,
       });
     } catch (error) {
       console.error("Error listing orders:", error);

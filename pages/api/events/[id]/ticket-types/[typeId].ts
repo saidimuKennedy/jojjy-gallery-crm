@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import prisma from "@/lib/prisma";
 import { requirePermission } from "@/lib/require-permission";
+import { capacityEditError } from "@/lib/ticketing/inventory";
 
 function parseOptionalDate(value: unknown): Date | null | undefined {
   if (value === undefined) return undefined;
@@ -21,6 +22,7 @@ function serializeTicketType(tt: {
   salesEnd: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  [key: string]: unknown;
 }) {
   return {
     ...tt,
@@ -60,20 +62,25 @@ export default async function handler(
           .json({ success: false, message: "Ticket type not found" });
       }
 
-      const { name, price, quantity, salesStart, salesEnd } = req.body as {
-        name?: string;
-        price?: number | string;
-        quantity?: number | string;
-        salesStart?: string | null;
-        salesEnd?: string | null;
-      };
+      const { name, description, price, quantity, salesStart, salesEnd, archived } =
+        req.body as {
+          name?: string;
+          description?: string | null;
+          price?: number | string;
+          quantity?: number | string;
+          salesStart?: string | null;
+          salesEnd?: string | null;
+          archived?: boolean;
+        };
 
       const data: {
         name?: string;
+        description?: string | null;
         price?: number;
         quantity?: number;
         salesStart?: Date | null;
         salesEnd?: Date | null;
+        archivedAt?: Date | null;
       } = {};
 
       if (name !== undefined) {
@@ -83,6 +90,13 @@ export default async function handler(
             .json({ success: false, message: "name cannot be empty" });
         }
         data.name = name.trim();
+      }
+
+      if (description !== undefined) {
+        data.description =
+          typeof description === "string" && description.trim()
+            ? description.trim().slice(0, 1000)
+            : null;
       }
 
       if (price !== undefined) {
@@ -97,13 +111,20 @@ export default async function handler(
 
       if (quantity !== undefined) {
         const parsed = parseInt(String(quantity), 10);
-        if (isNaN(parsed) || parsed < existing.quantitySold) {
-          return res.status(400).json({
-            success: false,
-            message: `quantity must be at least ${existing.quantitySold} (already sold)`,
-          });
+        if (isNaN(parsed) || parsed < 0) {
+          return res
+            .status(400)
+            .json({ success: false, message: "Invalid quantity" });
+        }
+        const guard = capacityEditError(existing, parsed);
+        if (guard) {
+          return res.status(409).json({ success: false, message: guard });
         }
         data.quantity = parsed;
+      }
+
+      if (archived !== undefined) {
+        data.archivedAt = archived ? new Date() : null;
       }
 
       const parsedStart = parseOptionalDate(salesStart);

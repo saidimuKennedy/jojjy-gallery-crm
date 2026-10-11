@@ -1,11 +1,13 @@
 import React, { useRef, useState } from "react";
 import { normalizeMediaUrl } from "@/lib/media-url";
+import { Button, Field, TextField } from "@/components/ui";
 
 /**
- * Shared media source field: upload a file from the local machine (stored
- * via /api/upload/image on Cloudinary) OR paste an external link
- * (Cloudinary URL, Google Drive / Dropbox share links are normalized to
- * direct links). Shows a preview once a value is set.
+ * Shared media source field: upload from this device (stored via
+ * /api/upload/image on Cloudinary) OR paste an external link (Cloudinary URL,
+ * Google Drive / Dropbox share links are normalized to direct links). Shows a
+ * preview once a value is set. Composes the shared UI primitives so it matches
+ * the rest of the CRM.
  */
 export default function MediaUrlField({
   label,
@@ -13,12 +15,14 @@ export default function MediaUrlField({
   onChange,
   accept = "image/*",
   hint,
+  wide = false,
 }: {
   label: string;
   value: string;
   onChange: (url: string) => void;
   accept?: string;
   hint?: string;
+  wide?: boolean;
 }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,10 +35,7 @@ export default function MediaUrlField({
     try {
       const body = new FormData();
       body.append("file", file);
-      const res = await fetch("/api/upload/image", {
-        method: "POST",
-        body,
-      });
+      const res = await fetch("/api/upload/image", { method: "POST", body });
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Upload failed");
       onChange(json.imageUrl as string);
@@ -58,45 +59,44 @@ export default function MediaUrlField({
   };
 
   return (
-    <div>
-      <span className="block text-xs font-medium uppercase tracking-wide text-ink-500">
-        {label}
-      </span>
+    <Field label={label} error={error}>
       {value ? (
-        <div className="mt-2 flex items-start gap-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
+        <div className={wide ? "mt-1 space-y-2" : "mt-1 flex items-start gap-3"}>
           <img
             src={value}
             alt=""
-            className="h-20 w-20 border border-gray-200 object-cover"
+            className={
+              wide
+                ? "aspect-[16/10] w-full rounded-field border border-border object-cover"
+                : "h-20 w-20 rounded-field border border-border object-cover"
+            }
           />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs text-gray-500" title={value}>
+            <p className="truncate text-xs text-ink-500" title={value}>
               {value}
             </p>
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              className="mt-1 px-0 text-red-600 hover:bg-transparent hover:text-red-700"
               onClick={() => {
                 setError(null);
                 onChange("");
               }}
-              className="mt-1 text-xs text-red-600 hover:text-red-900"
             >
               Remove
-            </button>
+            </Button>
           </div>
         </div>
       ) : (
-        <div className="mt-2 space-y-2">
+        <div className="mt-1 space-y-2">
           <div>
-            <button
-              type="button"
+            <Button
+              variant="secondary"
               disabled={uploading}
               onClick={() => fileRef.current?.click()}
-              className="border border-gray-300 px-3 py-2 text-sm text-black hover:border-black disabled:opacity-50"
             >
               {uploading ? "Uploading…" : "Upload from this device"}
-            </button>
+            </Button>
             <input
               ref={fileRef}
               type="file"
@@ -109,7 +109,7 @@ export default function MediaUrlField({
             />
           </div>
           <div className="flex gap-2">
-            <input
+            <TextField
               type="url"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -120,23 +120,17 @@ export default function MediaUrlField({
                 }
               }}
               placeholder="…or paste an image link (Drive, Dropbox, URL)"
-              className="w-full border border-gray-300 px-3 py-2 text-sm text-black focus:outline-none focus:border-black"
             />
-            <button
-              type="button"
-              onClick={useLink}
-              className="shrink-0 border border-gray-300 px-3 py-2 text-sm text-black hover:border-black"
-            >
+            <Button variant="secondary" onClick={useLink} className="shrink-0">
               Use link
-            </button>
+            </Button>
           </div>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-ink-400">
             {hint ||
               "JPEG, PNG, WebP or GIF, max 10MB. Drive and Dropbox share links are converted automatically."}
           </p>
         </div>
       )}
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
-    </div>
+    </Field>
   );
 }

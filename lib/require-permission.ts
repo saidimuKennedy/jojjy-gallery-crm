@@ -2,12 +2,13 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth-options";
 import prisma from "@/lib/prisma";
+import { getUserPermissionKeys } from "@/lib/permissions";
 
 /**
  * Require a signed-in, still-active CRM user with the given permission key.
- * Permissions ride the JWT (set at login), but isActive is re-checked against
- * the DB on every call so deactivated staff lose access immediately instead
- * of at token expiry.
+ * Permissions are resolved fresh from the DB (roles + per-user grants/revokes)
+ * on every call, not trusted from the JWT, so newly granted/revoked permissions
+ * and deactivated accounts take effect immediately.
  */
 async function activeSession(
   req: NextApiRequest,
@@ -26,7 +27,8 @@ async function activeSession(
     res.status(401).json({ success: false, message: "Authentication required" });
     return null;
   }
-  return { userId: session.user.id, permissions: session.user.permissions ?? [] };
+  const permissions = await getUserPermissionKeys(session.user.id);
+  return { userId: session.user.id, permissions: [...permissions] };
 }
 
 export async function requirePermission(

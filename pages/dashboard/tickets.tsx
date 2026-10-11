@@ -1,9 +1,26 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Head from "next/head";
+import { useRouter } from "next/router";
 import useSWR from "swr";
-import { Plus, Trash2, Pencil } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
-import { PageHeader } from "@/components/ComingSoon";
+import { useFormDraft } from "@/hooks/useFormDraft";
+import {
+  Button,
+  Card,
+  DateTimeField,
+  EmptyState,
+  ErrorState,
+  Field,
+  LoadingState,
+  PageHeader,
+  SectionHeading,
+  Select,
+  Table,
+  Td,
+  TextField,
+  Th,
+} from "@/components/ui";
 
 type EventOption = {
   id: number;
@@ -16,11 +33,14 @@ type TicketType = {
   id: number;
   eventId: number;
   name: string;
+  description: string | null;
   price: number;
   quantity: number;
   quantitySold: number;
+  quantityReserved: number;
   salesStart: string | null;
   salesEnd: string | null;
+  archivedAt: string | null;
 };
 
 const fetcher = async (url: string) => {
@@ -30,10 +50,13 @@ const fetcher = async (url: string) => {
   return json.data;
 };
 
-const inputClass =
-  "mt-1 w-full border border-ink-200 bg-white px-3 py-2 text-sm text-ink-950 outline-none focus:border-ink-950";
-const labelClass =
-  "block text-xs font-medium uppercase tracking-wide text-ink-500";
+const EMPTY_TICKET = {
+  name: "",
+  price: "",
+  quantity: "",
+  salesStart: "",
+  salesEnd: "",
+};
 
 function toDatetimeLocal(iso: string | null): string {
   if (!iso) return "";
@@ -76,11 +99,57 @@ export default function TicketsPage() {
   const [editSalesEnd, setEditSalesEnd] = useState("");
   const [editSaving, setEditSaving] = useState(false);
 
+  const createDraft = useFormDraft({
+    draftKey: eventId ? `jenga:crm:draft:ticket:new:${eventId}` : null,
+    values: { name, price, quantity, salesStart, salesEnd },
+    emptyValues: EMPTY_TICKET,
+    onRestore: (v) => {
+      setName(v.name ?? "");
+      setPrice(v.price ?? "");
+      setQuantity(v.quantity ?? "");
+      setSalesStart(v.salesStart ?? "");
+      setSalesEnd(v.salesEnd ?? "");
+    },
+    enabled: eventId !== "",
+  });
+
+  const editDraft = useFormDraft({
+    draftKey: editing ? `jenga:crm:draft:ticket:${editing.id}` : null,
+    values: {
+      name: editName,
+      price: editPrice,
+      quantity: editQuantity,
+      salesStart: editSalesStart,
+      salesEnd: editSalesEnd,
+    },
+    emptyValues: EMPTY_TICKET,
+    onRestore: (v) => {
+      setEditName(v.name ?? "");
+      setEditPrice(v.price ?? "");
+      setEditQuantity(v.quantity ?? "");
+      setEditSalesStart(v.salesStart ?? "");
+      setEditSalesEnd(v.salesEnd ?? "");
+    },
+    enabled: editing !== null,
+  });
+
   useEffect(() => {
     if (events?.length && eventId === "") {
       setEventId(events[0].id);
     }
   }, [events, eventId]);
+
+  const router = useRouter();
+  const eventPreselected = useRef(false);
+  useEffect(() => {
+    if (eventPreselected.current || !router.isReady || !events?.length) return;
+    const raw = router.query.event;
+    const token = Array.isArray(raw) ? raw[0] : raw;
+    if (!token || !events.some((e) => String(e.id) === token)) return;
+    eventPreselected.current = true;
+    setEventId(Number(token));
+    void router.replace(router.pathname, undefined, { shallow: true });
+  });
 
   const startEdit = (tt: TicketType) => {
     setEditing(tt);
@@ -115,6 +184,7 @@ export default function TicketsPage() {
       setQuantity("");
       setSalesStart("");
       setSalesEnd("");
+      createDraft.clear();
       mutate();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Create failed");
@@ -145,6 +215,7 @@ export default function TicketsPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Update failed");
       setEditing(null);
+      editDraft.clear();
       mutate();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Update failed");
@@ -153,12 +224,35 @@ export default function TicketsPage() {
     }
   };
 
+  const archive = async (tt: TicketType) => {
+    if (!eventId) return;
+    const next = !tt.archivedAt;
+    if (
+      !confirm(
+        next
+          ? "Archive this ticket type? It will stop selling but be kept for history."
+          : "Restore this ticket type to sale?"
+      )
+    )
+      return;
+    const res = await fetch(`/api/events/${eventId}/ticket-types/${tt.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived: next }),
+    });
+    if (!res.ok) {
+      const json = await res.json();
+      alert(json.message || "Failed");
+      return;
+    }
+    mutate();
+  };
+
   const remove = async (id: number) => {
     if (!eventId || !confirm("Delete this ticket type?")) return;
-    const res = await fetch(
-      `/api/events/${eventId}/ticket-types?id=${id}`,
-      { method: "DELETE" }
-    );
+    const res = await fetch(`/api/events/${eventId}/ticket-types?id=${id}`, {
+      method: "DELETE",
+    });
     if (!res.ok) {
       const json = await res.json();
       alert(json.message || "Delete failed");
@@ -174,243 +268,266 @@ export default function TicketsPage() {
       </Head>
       <PageHeader
         title="Tickets"
-        description="Ticket types, sales windows, and inventory per event."
+        subtitle="Ticket types, sales windows, and inventory per event."
       />
 
       <div className="mb-6 max-w-sm">
-        <label className={labelClass}>Event</label>
-        <select
-          className={inputClass}
-          value={eventId}
-          onChange={(e) =>
-            setEventId(e.target.value ? Number(e.target.value) : "")
-          }
-        >
-          <option value="">Select an event</option>
-          {(events || []).map((ev) => (
-            <option key={ev.id} value={ev.id}>
-              {ev.title} ({ev.status})
-            </option>
-          ))}
-        </select>
+        <Field label="Event">
+          <Select
+            value={eventId}
+            onChange={(e) =>
+              setEventId(e.target.value ? Number(e.target.value) : "")
+            }
+          >
+            <option value="">Select an event</option>
+            {(events || []).map((ev) => (
+              <option key={ev.id} value={ev.id}>
+                {ev.title} ({ev.status})
+              </option>
+            ))}
+          </Select>
+        </Field>
       </div>
 
       {!eventId ? (
-        <p className="text-sm text-ink-500">Choose an event to manage tickets.</p>
+        <EmptyState title="Choose an event" description="Select an event to manage its tickets." />
       ) : (
         <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
           <div>
             {isLoading ? (
-              <p className="text-sm text-ink-500">Loading ticket types…</p>
+              <LoadingState label="Loading ticket types…" />
             ) : error ? (
-              <p className="text-sm text-red-600">{error.message}</p>
+              <ErrorState message={error.message} onRetry={() => mutate()} />
             ) : !ticketTypes?.length ? (
-              <p className="text-sm text-ink-500">No ticket types yet.</p>
+              <EmptyState
+                title="No ticket types yet"
+                description="Add a tier using the form on the right."
+              />
             ) : (
-              <div className="overflow-x-auto border border-ink-200 bg-white">
-                <table className="w-full text-left text-sm">
-                  <thead className="border-b border-ink-200 bg-ink-50 text-xs uppercase tracking-wide text-ink-500">
-                    <tr>
-                      <th className="px-4 py-3 font-medium">Name</th>
-                      <th className="px-4 py-3 font-medium">Price</th>
-                      <th className="px-4 py-3 font-medium">Qty</th>
-                      <th className="px-4 py-3 font-medium">Sold</th>
-                      <th className="px-4 py-3 font-medium">Sales window</th>
-                      <th className="px-4 py-3 font-medium text-right"> </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ticketTypes.map((tt) => (
-                      <tr key={tt.id} className="border-b border-ink-100">
-                        <td className="px-4 py-3 font-medium">{tt.name}</td>
-                        <td className="px-4 py-3">
-                          USD {Number(tt.price).toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3">{tt.quantity}</td>
-                        <td className="px-4 py-3">{tt.quantitySold}</td>
-                        <td className="px-4 py-3 text-xs text-ink-600">
-                          {tt.salesStart
-                            ? new Date(tt.salesStart).toLocaleString()
-                            : "Open"}
-                          {" → "}
-                          {tt.salesEnd
-                            ? new Date(tt.salesEnd).toLocaleString()
-                            : "No end"}
-                        </td>
-                        <td className="px-4 py-3 text-right whitespace-nowrap">
-                          <button
-                            type="button"
-                            onClick={() => startEdit(tt)}
-                            className="p-1.5 text-ink-600 hover:text-ink-950"
-                            aria-label="Edit"
-                          >
-                            <Pencil className="h-4 w-4 inline" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => remove(tt.id)}
-                            className="p-1.5 text-ink-600 hover:text-red-700"
-                            aria-label="Delete"
-                          >
-                            <Trash2 className="h-4 w-4 inline" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <Table
+                head={
+                  <>
+                    <Th>Name</Th>
+                    <Th>Price</Th>
+                    <Th>Allocated</Th>
+                    <Th>Sold</Th>
+                    <Th>Reserved</Th>
+                    <Th>Sales window</Th>
+                    <Th className="text-right" />
+                  </>
+                }
+              >
+                {ticketTypes.map((tt) => (
+                  <tr key={tt.id}>
+                    <Td>
+                      <span className="font-medium text-ink-900">{tt.name}</span>
+                      {tt.archivedAt && (
+                        <span className="ml-2 text-xs text-ink-400">archived</span>
+                      )}
+                    </Td>
+                    <Td>USD {Number(tt.price).toLocaleString()}</Td>
+                    <Td>{tt.quantity}</Td>
+                    <Td>{tt.quantitySold}</Td>
+                    <Td>{tt.quantityReserved}</Td>
+                    <Td className="text-xs text-ink-500">
+                      {tt.salesStart
+                        ? new Date(tt.salesStart).toLocaleString()
+                        : "Open"}
+                      {" → "}
+                      {tt.salesEnd
+                        ? new Date(tt.salesEnd).toLocaleString()
+                        : "No end"}
+                    </Td>
+                    <Td className="whitespace-nowrap">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          className="px-2 py-1 text-xs"
+                          onClick={() => archive(tt)}
+                        >
+                          {tt.archivedAt ? "Restore" : "Archive"}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className="px-2 py-1"
+                          onClick={() => startEdit(tt)}
+                          aria-label="Edit"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className="px-2 py-1 text-red-600 hover:bg-red-50 hover:text-red-700"
+                          onClick={() => remove(tt.id)}
+                          aria-label="Delete"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </Td>
+                  </tr>
+                ))}
+              </Table>
             )}
 
             {editing && (
-              <form
-                onSubmit={saveEdit}
-                className="mt-6 space-y-3 border border-ink-200 bg-ink-50 p-4"
-              >
-                <h3 className="text-sm font-semibold text-ink-950">
-                  Edit ticket type
-                </h3>
-                <div>
-                  <label className={labelClass}>Name</label>
-                  <input
-                    className={inputClass}
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={labelClass}>Price (USD)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      className={inputClass}
-                      value={editPrice}
-                      onChange={(e) => setEditPrice(e.target.value)}
+              <Card className="mt-6">
+                <form onSubmit={saveEdit} className="space-y-3">
+                  <SectionHeading>Edit ticket type</SectionHeading>
+                  {editDraft.recovered && (
+                    <p className="text-xs text-ink-500">
+                      Draft recovered —{" "}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          editDraft.discard();
+                          if (editing) startEdit(editing);
+                        }}
+                        className="text-accent-700 underline-offset-2 hover:underline"
+                      >
+                        discard
+                      </button>
+                    </p>
+                  )}
+                  <Field label="Name" required>
+                    <TextField
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
                       required
                     />
-                  </div>
-                  <div>
-                    <label className={labelClass}>Quantity</label>
-                    <input
-                      type="number"
-                      min={editing.quantitySold}
-                      className={inputClass}
-                      value={editQuantity}
-                      onChange={(e) => setEditQuantity(e.target.value)}
+                  </Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Price (USD)" required>
+                      <TextField
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={editPrice}
+                        onChange={(e) => setEditPrice(e.target.value)}
+                        required
+                      />
+                    </Field>
+                    <Field
+                      label="Quantity"
                       required
-                    />
+                      hint={`Min ${editing.quantitySold + editing.quantityReserved} (sold + reserved)`}
+                    >
+                      <TextField
+                        type="number"
+                        min={editing.quantitySold + editing.quantityReserved}
+                        value={editQuantity}
+                        onChange={(e) => setEditQuantity(e.target.value)}
+                        required
+                      />
+                    </Field>
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={labelClass}>Sales start</label>
-                    <input
-                      type="datetime-local"
-                      className={inputClass}
-                      value={editSalesStart}
-                      onChange={(e) => setEditSalesStart(e.target.value)}
-                    />
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Sales start">
+                      <DateTimeField
+                        value={editSalesStart}
+                        onChange={(e) => setEditSalesStart(e.target.value)}
+                      />
+                    </Field>
+                    <Field label="Sales end">
+                      <DateTimeField
+                        value={editSalesEnd}
+                        onChange={(e) => setEditSalesEnd(e.target.value)}
+                      />
+                    </Field>
                   </div>
-                  <div>
-                    <label className={labelClass}>Sales end</label>
-                    <input
-                      type="datetime-local"
-                      className={inputClass}
-                      value={editSalesEnd}
-                      onChange={(e) => setEditSalesEnd(e.target.value)}
-                    />
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={editSaving}>
+                      {editSaving ? "Saving…" : "Save changes"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setEditing(null)}
+                    >
+                      Cancel
+                    </Button>
                   </div>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="submit"
-                    disabled={editSaving}
-                    className="bg-ink-950 px-4 py-2 text-sm text-white hover:bg-ink-800 disabled:opacity-50"
-                  >
-                    {editSaving ? "Saving…" : "Save changes"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditing(null)}
-                    className="border border-ink-300 px-4 py-2 text-sm text-ink-700"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
+                  {editDraft.savedAt && (
+                    <p className="text-right text-[11px] text-ink-400">
+                      Draft saved locally
+                    </p>
+                  )}
+                </form>
+              </Card>
             )}
           </div>
 
-          <form
-            onSubmit={create}
-            className="space-y-3 border border-ink-200 bg-white p-4 h-fit"
-          >
-            <h2 className="text-sm font-semibold text-ink-950">Add ticket type</h2>
-            {formError && (
-              <p className="text-sm text-red-600">{formError}</p>
-            )}
-            <div>
-              <label className={labelClass}>Name</label>
-              <input
-                className={inputClass}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Price (USD)</label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                className={inputClass}
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Quantity</label>
-              <input
-                type="number"
-                min="0"
-                className={inputClass}
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Sales start (optional)</label>
-              <input
-                type="datetime-local"
-                className={inputClass}
-                value={salesStart}
-                onChange={(e) => setSalesStart(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Sales end (optional)</label>
-              <input
-                type="datetime-local"
-                className={inputClass}
-                value={salesEnd}
-                onChange={(e) => setSalesEnd(e.target.value)}
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={saving}
-              className="inline-flex w-full items-center justify-center gap-2 bg-ink-950 px-4 py-2 text-sm text-white hover:bg-ink-800 disabled:opacity-50"
-            >
-              <Plus className="h-4 w-4" />
-              {saving ? "Adding…" : "Add ticket type"}
-            </button>
-          </form>
+          <Card className="h-fit">
+            <form onSubmit={create} className="space-y-3">
+              <SectionHeading>Add ticket type</SectionHeading>
+              {createDraft.recovered && (
+                <p className="text-xs text-ink-500">
+                  Draft recovered —{" "}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      createDraft.discard();
+                      setName("");
+                      setPrice("");
+                      setQuantity("");
+                      setSalesStart("");
+                      setSalesEnd("");
+                    }}
+                    className="text-accent-700 underline-offset-2 hover:underline"
+                  >
+                    discard
+                  </button>
+                </p>
+              )}
+              {formError && <p className="text-sm text-red-600">{formError}</p>}
+              <Field label="Name" required>
+                <TextField
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
+              </Field>
+              <Field label="Price (USD)" required>
+                <TextField
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  required
+                />
+              </Field>
+              <Field label="Quantity" required>
+                <TextField
+                  type="number"
+                  min="0"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  required
+                />
+              </Field>
+              <Field label="Sales start (optional)">
+                <DateTimeField
+                  value={salesStart}
+                  onChange={(e) => setSalesStart(e.target.value)}
+                />
+              </Field>
+              <Field label="Sales end (optional)">
+                <DateTimeField
+                  value={salesEnd}
+                  onChange={(e) => setSalesEnd(e.target.value)}
+                />
+              </Field>
+              <Button type="submit" disabled={saving} className="w-full">
+                <Plus className="h-4 w-4" />
+                {saving ? "Adding…" : "Add ticket type"}
+              </Button>
+              {createDraft.savedAt && (
+                <p className="text-right text-[11px] text-ink-400">
+                  Draft saved locally
+                </p>
+              )}
+            </form>
+          </Card>
         </div>
       )}
     </DashboardLayout>

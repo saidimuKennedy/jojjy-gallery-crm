@@ -1,9 +1,27 @@
 import { useEffect, useState } from "react";
 import Head from "next/head";
 import useSWR from "swr";
-import { Plus, Edit3, Trash2, X, Megaphone, EyeOff } from "lucide-react";
+import { Edit3, EyeOff, Megaphone, Plus, Trash2 } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
-import { PageHeader } from "@/components/ComingSoon";
+import MediaUrlField from "@/components/Admin/MediaUrlField";
+import { useFormDraft } from "@/hooks/useFormDraft";
+import { useResumeAction } from "@/hooks/useResumeAction";
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  Field,
+  LoadingState,
+  Modal,
+  PageHeader,
+  Select,
+  StatusBadge,
+  Table,
+  Td,
+  TextArea,
+  TextField,
+  Th,
+} from "@/components/ui";
 
 type EventOption = { id: number; title: string };
 
@@ -11,6 +29,7 @@ type AnnouncementRow = {
   id: number;
   title: string;
   body: string;
+  imageUrl: string | null;
   eventId: number | null;
   publishedAt: string | null;
   createdAt: string;
@@ -20,12 +39,14 @@ type AnnouncementRow = {
 type FormState = {
   title: string;
   body: string;
+  imageUrl: string;
   eventId: string;
 };
 
 const emptyForm = (): FormState => ({
   title: "",
   body: "",
+  imageUrl: "",
   eventId: "",
 });
 
@@ -35,10 +56,6 @@ const fetcher = async (url: string) => {
   if (!res.ok) throw new Error(json.message || "Failed to fetch");
   return json.data;
 };
-
-const inputClass =
-  "mt-1 w-full border border-ink-200 bg-white px-3 py-2 text-sm text-ink-950 outline-none focus:border-ink-950";
-const labelClass = "block text-xs font-medium uppercase tracking-wide text-ink-500";
 
 export default function AnnouncementsPage() {
   const {
@@ -61,12 +78,32 @@ export default function AnnouncementsPage() {
       setForm({
         title: editing.title,
         body: editing.body,
+        imageUrl: editing.imageUrl || "",
         eventId: editing.eventId ? String(editing.eventId) : "",
       });
     } else {
       setForm(emptyForm());
     }
   }, [editing, open]);
+
+  const announcementDraft = useFormDraft<FormState>({
+    draftKey: open
+      ? editing
+        ? `jenga:crm:draft:announcement:${editing.id}`
+        : "jenga:crm:draft:announcement:new"
+      : null,
+    values: form,
+    emptyValues: emptyForm(),
+    onRestore: (v) => setForm({ ...emptyForm(), ...v }),
+    enabled: open,
+  });
+
+  useResumeAction({
+    domain: "announcement",
+    rows: announcements,
+    onNew: () => openCreate(),
+    onEdit: (row) => openEdit(row),
+  });
 
   const openCreate = () => {
     setEditing(null);
@@ -91,15 +128,16 @@ export default function AnnouncementsPage() {
     setFormError(null);
     try {
       // Omit publish on "Save" so an already-published row keeps publishedAt.
-      // Only send publish: true when the Publish button is used.
       const payload: {
         title: string;
         body: string;
+        imageUrl: string | null;
         eventId: string | null;
         publish?: boolean;
       } = {
         title: form.title,
         body: form.body,
+        imageUrl: form.imageUrl || null,
         eventId: form.eventId || null,
       };
       if (publish) payload.publish = true;
@@ -115,6 +153,7 @@ export default function AnnouncementsPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Save failed");
       await mutate();
+      announcementDraft.clear();
       close();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Save failed");
@@ -179,203 +218,203 @@ export default function AnnouncementsPage() {
       </Head>
       <PageHeader
         title="Announcements"
-        description="Fan updates published to the on-site feed."
-      >
-        <button
-          type="button"
-          onClick={openCreate}
-          className="inline-flex items-center gap-2 bg-ink-950 px-4 py-2 text-sm text-white hover:bg-ink-800"
-        >
-          <Plus className="h-4 w-4" />
-          New announcement
-        </button>
-      </PageHeader>
+        subtitle="Fan updates published to the on-site feed."
+        actions={
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4" />
+            New announcement
+          </Button>
+        }
+      />
 
       {isLoading ? (
-        <p className="text-sm text-ink-500">Loading announcements…</p>
+        <LoadingState label="Loading announcements…" />
       ) : error ? (
-        <p className="text-sm text-red-600">{error.message}</p>
+        <ErrorState message={error.message} onRetry={() => mutate()} />
       ) : !announcements?.length ? (
-        <p className="text-sm text-ink-500">No announcements yet.</p>
+        <EmptyState
+          title="No announcements yet"
+          description="Write your first update for the public feed."
+          action={<Button onClick={openCreate}>New announcement</Button>}
+        />
       ) : (
-        <div className="overflow-x-auto border border-ink-200 bg-white">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-ink-200 bg-ink-50 text-xs uppercase tracking-wide text-ink-500">
-              <tr>
-                <th className="px-4 py-3 font-medium">Title</th>
-                <th className="px-4 py-3 font-medium">Event</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {announcements.map((row) => (
-                <tr key={row.id} className="border-b border-ink-100">
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{row.title}</div>
-                    <div className="mt-0.5 line-clamp-1 text-xs text-ink-500">
-                      {row.body}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-ink-700">
-                    {row.event?.title || "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    {row.publishedAt ? (
-                      <span className="text-xs uppercase tracking-wide text-ink-600">
-                        Published{" "}
-                        {new Date(row.publishedAt).toLocaleDateString()}
-                      </span>
-                    ) : (
-                      <span className="text-xs uppercase tracking-wide text-ink-400">
-                        Draft
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex justify-end gap-1">
-                      {!row.publishedAt ? (
-                        <button
-                          type="button"
-                          onClick={() => publishExisting(row)}
-                          className="p-1.5 text-ink-600 hover:text-ink-950"
-                          title="Publish"
-                          aria-label="Publish"
-                        >
-                          <Megaphone className="h-4 w-4" />
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => unpublishExisting(row)}
-                          className="p-1.5 text-ink-600 hover:text-ink-950"
-                          title="Unpublish"
-                          aria-label="Unpublish"
-                        >
-                          <EyeOff className="h-4 w-4" />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => openEdit(row)}
-                        className="p-1.5 text-ink-600 hover:text-ink-950"
-                        aria-label="Edit"
-                      >
-                        <Edit3 className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => remove(row.id)}
-                        className="p-1.5 text-ink-600 hover:text-red-700"
-                        aria-label="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table
+          head={
+            <>
+              <Th>Title</Th>
+              <Th>Event</Th>
+              <Th>Status</Th>
+              <Th className="text-right">Actions</Th>
+            </>
+          }
+        >
+          {announcements.map((row) => (
+            <tr key={row.id}>
+              <Td>
+                <div className="font-medium text-ink-900">{row.title}</div>
+                <div className="mt-0.5 line-clamp-1 text-xs text-ink-500">
+                  {row.body}
+                </div>
+              </Td>
+              <Td className="text-ink-600">{row.event?.title || "—"}</Td>
+              <Td>
+                {row.publishedAt ? (
+                  <StatusBadge tone="success">
+                    Published {new Date(row.publishedAt).toLocaleDateString()}
+                  </StatusBadge>
+                ) : (
+                  <StatusBadge tone="neutral">Draft</StatusBadge>
+                )}
+              </Td>
+              <Td>
+                <div className="flex justify-end gap-1">
+                  {!row.publishedAt ? (
+                    <Button
+                      variant="ghost"
+                      className="px-2 py-1"
+                      onClick={() => publishExisting(row)}
+                      title="Publish"
+                      aria-label="Publish"
+                    >
+                      <Megaphone className="h-4 w-4" />
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      className="px-2 py-1"
+                      onClick={() => unpublishExisting(row)}
+                      title="Unpublish"
+                      aria-label="Unpublish"
+                    >
+                      <EyeOff className="h-4 w-4" />
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    className="px-2 py-1"
+                    onClick={() => openEdit(row)}
+                    aria-label="Edit"
+                  >
+                    <Edit3 className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="px-2 py-1 text-red-600 hover:bg-red-50 hover:text-red-700"
+                    onClick={() => remove(row.id)}
+                    aria-label="Delete"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </Td>
+            </tr>
+          ))}
+        </Table>
       )}
 
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-950/40 px-4 py-10">
-          <div className="w-full max-w-xl border border-ink-200 bg-white shadow-lg">
-            <div className="flex items-center justify-between border-b border-ink-200 px-5 py-4">
-              <h2 className="text-lg font-semibold">
-                {editing ? "Edit announcement" : "New announcement"}
-              </h2>
-              <button type="button" onClick={close} aria-label="Close">
-                <X className="h-5 w-5 text-ink-500" />
+      <Modal
+        open={open}
+        title={editing ? "Edit announcement" : "New announcement"}
+        description={
+          editing
+            ? "Update this update for the public feed"
+            : "Write a new update for the public feed"
+        }
+        onClose={close}
+        editor
+        footer={
+          <>
+            <Button variant="secondary" onClick={close}>
+              Cancel
+            </Button>
+            <Button
+              variant={editing?.publishedAt ? "primary" : "secondary"}
+              disabled={saving || !form.title || !form.body}
+              onClick={() => save(false)}
+            >
+              {saving
+                ? "Saving…"
+                : editing?.publishedAt
+                  ? "Save"
+                  : "Save draft"}
+            </Button>
+            {!editing?.publishedAt && (
+              <Button
+                disabled={saving || !form.title || !form.body}
+                onClick={() => save(true)}
+              >
+                {saving ? "Saving…" : "Publish"}
+              </Button>
+            )}
+          </>
+        }
+      >
+        <div className="space-y-4">
+          {announcementDraft.recovered && (
+            <p className="text-xs text-ink-500">
+              Draft recovered —{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  announcementDraft.discard();
+                  if (editing) openEdit({ ...editing });
+                  else setForm(emptyForm());
+                }}
+                className="text-accent-700 underline-offset-2 hover:underline"
+              >
+                discard
               </button>
-            </div>
-            <div className="space-y-4 px-5 py-5">
-              {formError && (
-                <p className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {formError}
-                </p>
-              )}
-              <div>
-                <label className={labelClass}>Title</label>
-                <input
-                  className={inputClass}
-                  value={form.title}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, title: e.target.value }))
-                  }
-                  required
-                />
-              </div>
-              <div>
-                <label className={labelClass}>Body</label>
-                <textarea
-                  className={inputClass}
-                  rows={5}
-                  value={form.body}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, body: e.target.value }))
-                  }
-                  required
-                />
-              </div>
-              <div>
-                <label className={labelClass}>Event (optional)</label>
-                <select
-                  className={inputClass}
-                  value={form.eventId}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, eventId: e.target.value }))
-                  }
-                >
-                  <option value="">None</option>
-                  {(events || []).map((ev) => (
-                    <option key={ev.id} value={ev.id}>
-                      {ev.title}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex justify-end gap-2 border-t border-ink-100 pt-4">
-                <button
-                  type="button"
-                  onClick={close}
-                  className="px-4 py-2 text-sm text-ink-700 hover:text-ink-950"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={saving || !form.title || !form.body}
-                  onClick={() => save(false)}
-                  className={
-                    editing?.publishedAt
-                      ? "bg-ink-950 px-4 py-2 text-sm text-white hover:bg-ink-800 disabled:opacity-50"
-                      : "border border-ink-300 px-4 py-2 text-sm text-ink-800 hover:bg-ink-50 disabled:opacity-50"
-                  }
-                >
-                  {saving
-                    ? "Saving…"
-                    : editing?.publishedAt
-                      ? "Save"
-                      : "Save draft"}
-                </button>
-                {!editing?.publishedAt && (
-                  <button
-                    type="button"
-                    disabled={saving || !form.title || !form.body}
-                    onClick={() => save(true)}
-                    className="bg-ink-950 px-4 py-2 text-sm text-white hover:bg-ink-800 disabled:opacity-50"
-                  >
-                    {saving ? "Saving…" : "Publish"}
-                  </button>
-                )}
-              </div>
-            </div>
+            </p>
+          )}
+          {formError && <p className="text-sm text-red-600">{formError}</p>}
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(16rem,0.9fr)] md:items-start">
+            <Field label="Title" required>
+              <TextField
+                value={form.title}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, title: e.target.value }))
+                }
+                required
+              />
+            </Field>
+            <MediaUrlField
+              label="Cover image (optional)"
+              value={form.imageUrl}
+              onChange={(imageUrl) => setForm((p) => ({ ...p, imageUrl }))}
+              wide
+              hint="Shown beside this update in the gallery app. JPEG, PNG, WebP or GIF, max 10MB."
+            />
           </div>
+          <Field label="Body" required>
+            <TextArea
+              rows={5}
+              value={form.body}
+              onChange={(e) => setForm((p) => ({ ...p, body: e.target.value }))}
+              required
+            />
+          </Field>
+          <Field label="Event (optional)">
+            <Select
+              value={form.eventId}
+              onChange={(e) =>
+                setForm((p) => ({ ...p, eventId: e.target.value }))
+              }
+            >
+              <option value="">None</option>
+              {(events || []).map((ev) => (
+                <option key={ev.id} value={ev.id}>
+                  {ev.title}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {announcementDraft.savedAt && (
+            <p className="text-right text-[11px] text-ink-400">
+              Draft saved locally
+            </p>
+          )}
         </div>
-      )}
+      </Modal>
     </DashboardLayout>
   );
 }

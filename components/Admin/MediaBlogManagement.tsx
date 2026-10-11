@@ -1,10 +1,27 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Edit3, Trash2, X, AlertCircle, Image, Video, Mic, ExternalLink, FileText } from "lucide-react";
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  Field,
+  LoadingState,
+  Modal,
+  PageHeader,
+  SectionHeading,
+  StatusBadge,
+  Table,
+  Td,
+  TextArea,
+  TextField,
+  Th,
+} from "@/components/ui";
+import { Plus, Edit3, Trash2, X } from "lucide-react";
 import useSWR from "swr";
 import { APIError } from "@/types/api";
 import { MediaBlogEntry, MediaBlogFile, MediaBlogEntryType, MediaFileType } from "@prisma/client";
 import MediaUrlField from "@/components/Admin/MediaUrlField";
+import { useResumeAction } from "@/hooks/useResumeAction";
+import { useFormDraft } from "@/hooks/useFormDraft";
 
 export type MediaBlogEntryWithRelations = MediaBlogEntry & {
   mediaFiles: MediaBlogFile[];
@@ -98,6 +115,20 @@ const MediaBlogManagement = () => {
     }
   }, [editingEntry, isModalOpen]);
 
+  // Local draft persistence (after populate so restores win over server data).
+  const mediaBlogDraftKey = isModalOpen
+    ? editingEntry
+      ? `jenga:crm:draft:mediablog:${editingEntry.id}`
+      : "jenga:crm:draft:mediablog:new"
+    : null;
+  const mediaBlogDraft = useFormDraft({
+    draftKey: mediaBlogDraftKey,
+    values: formData,
+    emptyValues: initialFormData,
+    onRestore: (v) => setFormData(v),
+    enabled: isModalOpen,
+  });
+
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
       const { name, value } = e.target;
@@ -149,6 +180,13 @@ const MediaBlogManagement = () => {
       };
     });
   }, []);
+
+  useResumeAction({
+    domain: "mediablog",
+    rows: mediaBlogEntries,
+    onNew: () => handleAddEntry(),
+    onEdit: (row) => handleEditEntry(row),
+  });
 
   const handleAddEntry = () => {
     setEditingEntry(null);
@@ -218,6 +256,7 @@ const MediaBlogManagement = () => {
           : "Media Blog Entry added successfully!"
       );
       mutate();
+      mediaBlogDraft.clear();
       setTimeout(() => closeModal(), 1500);
     } catch (err: any) {
       console.error("Failed to save media blog entry:", err);
@@ -264,176 +303,213 @@ const MediaBlogManagement = () => {
     }
   };
 
-  if (isLoading)
-    return <div className="text-center py-8">Loading media blog entries...</div>;
-  if (error)
-    return (
-      <div className="text-center py-8 text-red-500">
-        Error: {error.message}
-      </div>
-    );
+  if (isLoading) return <LoadingState label="Loading media & blog…" />;
+  if (error) return <ErrorState message={error.message} />;
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-black">Manage Media & Blog Entries</h2>
-        <button
-          onClick={handleAddEntry}
-          className="bg-black text-white px-6 py-3 rounded-md hover:bg-gray-800 transition-colors flex items-center"
-        >
-          <Plus className="w-5 h-5 mr-2" /> Add New Entry
-        </button>
-      </div>
+    <div>
+      <PageHeader
+        title="Manage Media & Blog"
+        subtitle="Videos, image sets, audio, and posts shown on the public updates page."
+        actions={
+          <Button onClick={handleAddEntry}>
+            <Plus className="h-4 w-4" /> Add New Entry
+          </Button>
+        }
+      />
 
       {mediaBlogEntries && mediaBlogEntries.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">
-          No media blog entries found. Add your first entry!
-        </div>
+        <EmptyState
+          title="No entries found"
+          description="Add your first media or blog entry."
+          action={<Button onClick={handleAddEntry}>Add New Entry</Button>}
+        />
       ) : (
-        <div className="overflow-x-auto bg-white rounded-lg shadow">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Title
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Type
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Short Description
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Files
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Created At
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {mediaBlogEntries?.map((entry) => (
-                <tr key={entry.id}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {entry.title}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {entry.type}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {entry.publishedAt ? (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        Published
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                        Draft
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-500 max-w-xs">
-                    <div className="truncate" title={entry.shortDesc || ""}>
-                      {entry.shortDesc || "-"}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {entry.mediaFiles.length > 0 ? (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                        {entry.mediaFiles.length} files
-                      </span>
-                    ) : (
-                      "No files"
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {new Date(entry.createdAt).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button
-                      onClick={() => handleEditEntry(entry)}
-                      className="text-gray-900 hover:text-black mr-4"
-                    >
-                      <Edit3 className="w-5 h-5 inline-block" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteEntry(entry.id)}
-                      className="text-red-600 hover:text-red-900"
-                    >
-                      <Trash2 className="w-5 h-5 inline-block" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table
+          head={
+            <>
+              <Th>Title</Th>
+              <Th>Type</Th>
+              <Th>Status</Th>
+              <Th>Short description</Th>
+              <Th>Files</Th>
+              <Th>Created</Th>
+              <Th className="text-right">Actions</Th>
+            </>
+          }
+        >
+          {mediaBlogEntries?.map((entry) => (
+            <tr key={entry.id}>
+              <Td className="font-medium text-ink-900">{entry.title}</Td>
+              <Td className="text-ink-500">{entry.type}</Td>
+              <Td>
+                <StatusBadge tone={entry.publishedAt ? "success" : "neutral"}>
+                  {entry.publishedAt ? "Published" : "Draft"}
+                </StatusBadge>
+              </Td>
+              <Td className="max-w-xs text-ink-500">
+                <div className="truncate" title={entry.shortDesc || ""}>
+                  {entry.shortDesc || "-"}
+                </div>
+              </Td>
+              <Td className="text-ink-500">
+                {entry.mediaFiles.length > 0 ? (
+                  <StatusBadge tone="info">
+                    {entry.mediaFiles.length} files
+                  </StatusBadge>
+                ) : (
+                  "No files"
+                )}
+              </Td>
+              <Td className="text-ink-500">
+                {new Date(entry.createdAt).toLocaleDateString()}
+              </Td>
+              <Td>
+                <div className="flex justify-end gap-1">
+                  <Button
+                    variant="ghost"
+                    className="px-2 py-1"
+                    aria-label="Edit entry"
+                    onClick={() => handleEditEntry(entry)}
+                  >
+                    <Edit3 className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="px-2 py-1 text-red-600 hover:bg-red-50 hover:text-red-700"
+                    aria-label="Delete entry"
+                    onClick={() => handleDeleteEntry(entry.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </Td>
+            </tr>
+          ))}
+        </Table>
       )}
 
-      <AnimatePresence>
-        {isModalOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
-          >
-            <motion.div
-              initial={{ y: -50, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 50, opacity: 0 }}
-              className="bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl relative overflow-y-auto max-h-[90vh]"
+      <Modal
+        open={isModalOpen}
+        title={editingEntry ? "Edit media blog entry" : "New media blog entry"}
+        description={
+          editingEntry
+            ? "Update entry details and media"
+            : "Create a post, video, image set, or audio entry"
+        }
+        onClose={closeModal}
+        editor
+        wide
+        footer={
+          <>
+            {submitError && (
+              <span className="mr-auto text-sm text-red-600">{submitError}</span>
+            )}
+            {successMessage && (
+              <span className="mr-auto text-sm text-green-700">
+                {successMessage}
+              </span>
+            )}
+            {mediaBlogDraft.savedAt && (
+              <span className="mr-auto text-xs text-ink-400">
+                Draft saved locally
+              </span>
+            )}
+            <Button
+              variant="secondary"
+              onClick={closeModal}
+              disabled={isSubmitting}
             >
-              <button
-                onClick={closeModal}
-                className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
-              >
-                <X className="w-6 h-6" />
-              </button>
-              <h3 className="text-2xl font-bold mb-6 text-gray-800">
-                {editingEntry ? "Edit Media Blog Entry" : "Add New Media Blog Entry"}
-              </h3>
+              Cancel
+            </Button>
+            <Button type="submit" form="mediablog-form" disabled={isSubmitting}>
+              {isSubmitting
+                ? editingEntry
+                  ? "Updating…"
+                  : "Adding…"
+                : editingEntry
+                  ? "Update Entry"
+                  : "Add Entry"}
+            </Button>
+          </>
+        }
+      >
+        {mediaBlogDraft.recovered && (
+          <p className="text-xs text-ink-500">
+            Draft recovered —{" "}
+            <button
+              type="button"
+              onClick={() => {
+                mediaBlogDraft.discard();
+                setFormData(
+                  editingEntry
+                    ? {
+                        id: editingEntry.id,
+                        title: editingEntry.title,
+                        shortDesc: editingEntry.shortDesc || "",
+                        type: editingEntry.type,
+                        externalLink: editingEntry.externalLink || "",
+                        thumbnailUrl: editingEntry.thumbnailUrl || "",
+                        duration: editingEntry.duration || "",
+                        content: editingEntry.content || "",
+                        published: !!editingEntry.publishedAt,
+                        mediaFiles:
+                          editingEntry.mediaFiles?.map((mf) => ({
+                            id: mf.id,
+                            url: mf.url,
+                            type: mf.type,
+                            description: mf.description || "",
+                            thumbnailUrl: mf.thumbnailUrl || "",
+                            order: mf.order,
+                          })) || [],
+                      }
+                    : initialFormData
+                );
+              }}
+              className="text-accent-700 underline-offset-2 hover:underline"
+            >
+              discard
+            </button>
+          </p>
+        )}
 
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label htmlFor="title" className="block text-sm font-medium text-black mb-2">
-                    Title
-                  </label>
-                  <input
-                    type="text"
-                    id="title"
-                    name="title"
-                    value={formData.title}
-                    onChange={handleChange}
-                    required
-                    className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
-                  />
+              <form id="mediablog-form" onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="title" className="block text-sm font-medium text-black mb-2">
+                      Title
+                    </label>
+                    <input
+                      type="text"
+                      id="title"
+                      name="title"
+                      value={formData.title}
+                      onChange={handleChange}
+                      required
+                      className="w-full border border-border px-3 py-2 text-black focus:outline-none focus:border-accent-500"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="type" className="block text-sm font-medium text-black mb-2">
+                      Entry Type
+                    </label>
+                    <select
+                      id="type"
+                      name="type"
+                      value={formData.type}
+                      onChange={handleChange}
+                      required
+                      className="w-full border border-border px-3 py-2 text-black focus:outline-none focus:border-accent-500 bg-white"
+                    >
+                      {Object.values(MediaBlogEntryType).map((type) => (
+                        <option key={type} value={type}>
+                          {type.replace(/_/g, " ")}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label htmlFor="type" className="block text-sm font-medium text-black mb-2">
-                    Entry Type
-                  </label>
-                  <select
-                    id="type"
-                    name="type"
-                    value={formData.type}
-                    onChange={handleChange}
-                    required
-                    className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black bg-white"
-                  >
-                    {Object.values(MediaBlogEntryType).map((type) => (
-                      <option key={type} value={type}>
-                        {type.replace(/_/g, " ")}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-start gap-3 border border-gray-300 px-3 py-3">
+                <div className="flex items-start gap-3 border border-border px-3 py-3">
                   <input
                     type="checkbox"
                     id="published"
@@ -449,7 +525,7 @@ const MediaBlogManagement = () => {
                   />
                   <label htmlFor="published" className="text-sm text-black">
                     <span className="font-medium">Published</span>
-                    <span className="block text-gray-500">
+                    <span className="block text-ink-500">
                       Uncheck to keep this entry as a private draft — drafts
                       never appear on the public site, homepage, or sitemap.
                     </span>
@@ -464,7 +540,7 @@ const MediaBlogManagement = () => {
                     value={formData.shortDesc}
                     onChange={handleChange}
                     rows={2}
-                    className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
+                    className="w-full border border-border px-3 py-2 text-black focus:outline-none focus:border-accent-500"
                   ></textarea>
                 </div>
                 {formData.type === MediaBlogEntryType.EXTERNAL_LINK && (
@@ -478,7 +554,7 @@ const MediaBlogManagement = () => {
                       name="externalLink"
                       value={formData.externalLink}
                       onChange={handleChange}
-                      className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
+                      className="w-full border border-border px-3 py-2 text-black focus:outline-none focus:border-accent-500"
                       placeholder="https://example.com/blog-post"
                     />
                   </div>
@@ -504,7 +580,7 @@ const MediaBlogManagement = () => {
                         name="duration"
                         value={formData.duration}
                         onChange={handleChange}
-                        className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
+                        className="w-full border border-border px-3 py-2 text-black focus:outline-none focus:border-accent-500"
                         placeholder="HH:MM:SS or MM:SS"
                       />
                     </div>
@@ -521,21 +597,22 @@ const MediaBlogManagement = () => {
                       value={formData.content}
                       onChange={handleChange}
                       rows={8}
-                      className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
+                      className="w-full border border-border px-3 py-2 text-black focus:outline-none focus:border-accent-500"
                     ></textarea>
                   </div>
                 )}
 
-                <h4 className="text-xl font-bold mt-6 mb-3 text-gray-800">Associated Media Files</h4>
+                <h4 className="text-xl font-bold mt-6 mb-3 text-ink-800">Associated Media Files</h4>
                 {formData.mediaFiles.length === 0 && (
-                  <p className="text-gray-500">No media files added yet.</p>
+                  <p className="text-ink-500">No media files added yet.</p>
                 )}
                 <div className="space-y-4">
                   {formData.mediaFiles.map((mediaFile, index) => (
-                    <div key={mediaFile.id || `new-${index}`} className="border p-4 rounded-md bg-gray-50 relative">
+                    <div key={mediaFile.id || `new-${index}`} className="border p-4 rounded-field bg-ink-50 relative">
                       <button
                         type="button"
                         onClick={() => removeMediaFile(index)}
+                        aria-label="Remove media"
                         className="absolute top-2 right-2 text-red-500 hover:text-red-700"
                       >
                         <X className="w-5 h-5" />
@@ -567,7 +644,7 @@ const MediaBlogManagement = () => {
                             value={mediaFile.type}
                             onChange={(e) => handleMediaFileChange(index, e)}
                             required
-                            className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black bg-white"
+                            className="w-full border border-border px-3 py-2 text-black focus:outline-none focus:border-accent-500 bg-white"
                           >
                             {Object.values(MediaFileType).map((type) => (
                               <option key={type} value={type}>
@@ -586,7 +663,7 @@ const MediaBlogManagement = () => {
                             value={mediaFile.description}
                             onChange={(e) => handleMediaFileChange(index, e)}
                             rows={2}
-                            className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
+                            className="w-full border border-border px-3 py-2 text-black focus:outline-none focus:border-accent-500"
                           ></textarea>
                         </div>
                         {(mediaFile.type === MediaFileType.VIDEO || mediaFile.type === MediaFileType.AUDIO) && (
@@ -618,7 +695,7 @@ const MediaBlogManagement = () => {
                             value={mediaFile.order}
                             onChange={(e) => handleMediaFileChange(index, e)}
                             required
-                            className="w-full border border-gray-300 px-3 py-2 text-black focus:outline-none focus:border-black"
+                            className="w-full border border-border px-3 py-2 text-black focus:outline-none focus:border-accent-500"
                           />
                         </div>
                       </div>
@@ -628,52 +705,12 @@ const MediaBlogManagement = () => {
                 <button
                   type="button"
                   onClick={addMediaFile}
-                  className="mt-4 bg-gray-200 text-gray-800 px-4 py-2 rounded-md hover:bg-gray-300 transition-colors flex items-center"
+                  className="mt-4 bg-ink-100 text-ink-800 px-4 py-2 rounded-field hover:bg-ink-200 transition-colors flex items-center"
                 >
                   <Plus className="w-4 h-4 mr-2" /> Add Media File
                 </button>
-
-                {submitError && (
-                  <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
-                    <strong className="font-bold">Error!</strong>
-                    <span className="block sm:inline"> {submitError}</span>
-                  </div>
-                )}
-                {successMessage && (
-                  <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4" role="alert">
-                    <strong className="font-bold">Success!</strong>
-                    <span className="block sm:inline"> {successMessage}</span>
-                  </div>
-                )}
-
-                <div className="flex justify-end space-x-3 mt-6">
-                  <button
-                    type="button"
-                    onClick={closeModal}
-                    className="px-4 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
-                    disabled={isSubmitting}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="bg-black text-white px-6 py-3 hover:bg-gray-800 transition-colors"
-                    disabled={isSubmitting}
-                  >
-                    {isSubmitting
-                      ? editingEntry
-                        ? "Updating..."
-                        : "Adding..."
-                      : editingEntry
-                      ? "Update Entry"
-                      : "Add Entry"}
-                  </button>
-                </div>
               </form>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      </Modal>
     </div>
   );
 };

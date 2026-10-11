@@ -20,6 +20,7 @@ function serializeTicketType(tt: {
   salesEnd: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  [key: string]: unknown;
 }) {
   return {
     ...tt,
@@ -65,7 +66,8 @@ export default async function handler(
   if (req.method === "POST") {
     if (!(await requirePermission(req, res, "tickets:write"))) return;
     try {
-      const { name, price, quantity, salesStart, salesEnd } = req.body;
+      const { name, description, price, quantity, salesStart, salesEnd } =
+        req.body;
       if (!name || price === undefined || quantity === undefined) {
         return res.status(400).json({
           success: false,
@@ -108,6 +110,10 @@ export default async function handler(
         data: {
           eventId,
           name,
+          description:
+            typeof description === "string" && description.trim()
+              ? description.trim().slice(0, 1000)
+              : null,
           price: priceNum,
           quantity: qtyNum,
           salesStart: parsedStart,
@@ -151,11 +157,11 @@ export default async function handler(
           .status(404)
           .json({ success: false, message: "Ticket type not found" });
       }
-      if (existing.quantitySold > 0) {
+      if (existing.quantitySold > 0 || existing.quantityReserved > 0) {
         return res.status(409).json({
           success: false,
           message:
-            "Tickets of this type have been sold; it cannot be deleted. Close sales with a sales window instead.",
+            "This ticket type has sales or active reservations and cannot be deleted. Archive it instead.",
         });
       }
 

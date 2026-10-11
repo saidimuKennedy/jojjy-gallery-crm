@@ -78,6 +78,7 @@ export default async function handler(
           directions,
           openingHours,
           artistTalkAt,
+          ticketMode,
           ticketTypes,
         } = req.body;
 
@@ -103,6 +104,8 @@ export default async function handler(
         }
 
         const eventSlug = slug || slugify(title);
+        const eventTicketMode =
+          ticketMode === "RSVP_ONLY" ? "RSVP_ONLY" : "TICKETED";
 
         // Inline ticket types get the same validation as the dedicated
         // ticket-type routes: no negative/NaN price or quantity, and a sane
@@ -110,6 +113,7 @@ export default async function handler(
         const inlineTickets = (ticketTypes ?? []).map(
           (tt: {
             name: string;
+            description?: string | null;
             price: number | string;
             quantity: number;
             salesStart?: string | null;
@@ -121,7 +125,17 @@ export default async function handler(
               typeof tt.quantity === "number" ? tt.quantity : Number(tt.quantity);
             const salesStart = tt.salesStart ? new Date(tt.salesStart) : null;
             const salesEnd = tt.salesEnd ? new Date(tt.salesEnd) : null;
-            return { name: tt.name, price, quantity, salesStart, salesEnd };
+            return {
+              name: tt.name,
+              description:
+                typeof tt.description === "string" && tt.description.trim()
+                  ? tt.description.trim().slice(0, 1000)
+                  : null,
+              price,
+              quantity,
+              salesStart,
+              salesEnd,
+            };
           }
         );
         for (const tt of inlineTickets) {
@@ -171,6 +185,7 @@ export default async function handler(
             endsAt: endsAt ? new Date(endsAt) : null,
             publishAt: storedPublishAt,
             status: eventStatus,
+            ticketMode: eventTicketMode,
             directions: directions ?? null,
             openingHours: openingHours ?? null,
             artistTalkAt: artistTalkAt ? new Date(artistTalkAt) : null,
